@@ -26,7 +26,19 @@ class MediaInfo:
         return " ".join(parts)
 
 def clean_title(title):
-    # Remove dots, underscores
+    # 1. Remove URLs
+    title = re.sub(r'https?://\S+', '', title)
+
+    # 2. Remove Telegram Handles (e.g. @ChannelName)
+    # Heuristic: Matches @Handle.
+    # If using underscore, assumes handle parts after _ are lowercase/numbers (common in handles).
+    # If an uppercase letter follows _, it's likely the start of the Title (e.g. @WMR_Maryan).
+    title = re.sub(r'@[a-zA-Z0-9]+(?:_[a-z0-9]+)*', '', title)
+
+    # 3. Remove content in square brackets [] globally
+    title = re.sub(r'\[.*?\]', '', title)
+
+    # 4. Remove dots, underscores (Replace with space)
     title = title.replace(".", " ").replace("_", " ")
     
     # Remove custom spam keywords
@@ -36,10 +48,6 @@ def clean_title(title):
         pattern = re.compile(re.escape(keyword), re.IGNORECASE)
         title = pattern.sub(' ', title)
 
-    # Remove starting spam/brackets: e.g. "[SubGroup] Title" -> "Title"
-    # Logic: If starts with [, remove until ]
-    title = re.sub(r'^\[.*?\]\s*', '', title)
-    
     # Remove starting non-alphanumeric chars (generic)
     title = re.sub(r'^[^a-zA-Z0-9]+', '', title)
     
@@ -97,9 +105,10 @@ def find_metadata_split(text):
     # Keywords: Year, Resolution, SxxExx
     
     # Check Year first
-    year_match = re.search(r'(\b(19|20)\d{2}\b)', text)
+    # Improved regex to handle boundaries like _ or . (negative lookaround for digits)
+    year_match = re.search(r'(?<!\d)(19|20)\d{2}(?!\d)', text)
     if year_match:
-        return year_match.start(), year_match.group(1)
+        return year_match.start(), year_match.group(0)
         
     # Check Season/Episode
     se_patterns = [

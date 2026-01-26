@@ -1,13 +1,36 @@
+import os
+import sys
 import logging
 import asyncio
-from pyrogram import Client, filters
-from pyrogram.enums import ParseMode
+from pyrogram import Client, filters, idle, utils
+from aiohttp import web
+
+# Monkeypatch Pyrogram to support 64-bit Channel IDs
+# This is required because newer Telegram Channel IDs exceed the legacy 32-bit range check in Pyrogram v2.
+# Original: -1002147483647
+utils.MIN_CHANNEL_ID = -1009999999999
+
 from config import API_ID, API_HASH, BOT_TOKEN, SOURCE_CHANNEL, TARGET_CHANNEL, LOG_CHANNEL
 from media_parser import parse_media_info
+from web_server import start_web_server
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
+# Environment Variable Validation
+if not API_ID:
+    logger.error("API_ID is missing.")
+    sys.exit(1)
+if not API_HASH:
+    logger.error("API_HASH is missing.")
+    sys.exit(1)
+if not BOT_TOKEN:
+    logger.error("BOT_TOKEN is missing.")
+    sys.exit(1)
 
 app = Client("renamer_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
@@ -98,8 +121,43 @@ async def handle_media(client, message):
     except Exception as e:
         logger.error(f"Error processing message: {e}", exc_info=True)
         if LOG_CHANNEL:
-            await client.send_message(LOG_CHANNEL, f"Error processing message: {str(e)}")
+            try:
+                await client.send_message(LOG_CHANNEL, f"Error processing message: {str(e)}")
+            except Exception as log_error:
+                logger.error(f"Failed to send error to LOG_CHANNEL: {log_error}")
+
+async def main():
+    # Start Web Server
+    logger.info("Starting Web Server...")
+    web_app = await start_web_server()
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    bind_address = "0.0.0.0"
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, bind_address, port)
+    await site.start()
+    logger.info(f"Web Server running on port {port}")
+
+    # Start Bot
+    logger.info("Starting Bot...")
+    await app.start()
+    logger.info("Bot started!")
+
+    # Idle to keep the script running
+    await idle()
+
+    # Cleanup
+    logger.info("Stopping Bot...")
+    await app.stop()
+    logger.info("Stopping Web Server...")
+    await runner.cleanup()
 
 if __name__ == "__main__":
-    logger.info("Bot started...")
-    app.run()
+    try:
+        # Check for loop
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    loop.run_until_complete(main())

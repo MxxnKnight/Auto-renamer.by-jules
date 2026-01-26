@@ -3,6 +3,7 @@ import sys
 import logging
 import asyncio
 from pyrogram import Client, filters, idle, utils
+from pyrogram.errors import FloodWait
 from aiohttp import web
 
 # Monkeypatch Pyrogram to support 64-bit Channel IDs
@@ -52,6 +53,17 @@ def get_file_id(message):
         return message.audio.file_id
     return None
 
+async def send_with_flood_handling(func, *args, **kwargs):
+    try:
+        return await func(*args, **kwargs)
+    except FloodWait as e:
+        logger.warning(f"FloodWait hit. Sleeping for {e.value} seconds.")
+        await asyncio.sleep(e.value)
+        return await send_with_flood_handling(func, *args, **kwargs)
+    except Exception as e:
+        logger.error(f"Error in send_with_flood_handling: {e}")
+        raise e
+
 @app.on_message(filters.chat(SOURCE_CHANNEL) & (filters.document | filters.video | filters.audio))
 async def handle_media(client, message):
     try:
@@ -88,7 +100,7 @@ async def handle_media(client, message):
             error_msg = f"Failed to parse title for: {file_name}\nCaption: {caption}"
             logger.warning(error_msg)
             if LOG_CHANNEL:
-                await client.send_message(LOG_CHANNEL, error_msg)
+                await send_with_flood_handling(client.send_message, LOG_CHANNEL, error_msg)
             return
 
         new_caption = str(info)
@@ -99,21 +111,24 @@ async def handle_media(client, message):
         file_id = get_file_id(message)
         
         if message.video:
-            sent = await client.send_video(
+            sent = await send_with_flood_handling(
+                client.send_video,
                 chat_id=TARGET_CHANNEL,
                 video=file_id,
                 caption=new_caption,
                 supports_streaming=True
             )
         elif message.document:
-            sent = await client.send_document(
+            sent = await send_with_flood_handling(
+                client.send_document,
                 chat_id=TARGET_CHANNEL,
                 document=file_id,
                 caption=new_caption,
                 force_document=True
             )
         elif message.audio:
-            sent = await client.send_audio(
+            sent = await send_with_flood_handling(
+                client.send_audio,
                 chat_id=TARGET_CHANNEL,
                 audio=file_id,
                 caption=new_caption
@@ -123,7 +138,7 @@ async def handle_media(client, message):
             logger.info(f"Sent to target: {sent.id}")
             # Delete original message
             try:
-                await message.delete()
+                await send_with_flood_handling(message.delete)
                 logger.info("Original message deleted.")
             except Exception as e:
                 logger.error(f"Failed to delete original message: {e}")
@@ -134,7 +149,7 @@ async def handle_media(client, message):
         logger.error(f"Error processing message: {e}", exc_info=True)
         if LOG_CHANNEL:
             try:
-                await client.send_message(LOG_CHANNEL, f"Error processing message: {str(e)}")
+                await send_with_flood_handling(client.send_message, LOG_CHANNEL, f"Error processing message: {str(e)}")
             except Exception as log_error:
                 logger.error(f"Failed to send error to LOG_CHANNEL: {log_error}")
 

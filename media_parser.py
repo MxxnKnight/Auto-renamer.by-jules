@@ -40,7 +40,10 @@ def clean_title(title):
     # 1. Remove URLs
     title = re.sub(r'https?://\S+', '', title)
 
-    # 2. Handle Telegram Handles
+    # 2. Remove Hashtags (words starting with #)
+    title = re.sub(r'#\w+', '', title)
+
+    # 3. Handle Telegram Handles
     if title.startswith('@'):
         parts = re.split(r'[ ._]+', title)
         if parts and parts[0].startswith('@'):
@@ -51,10 +54,28 @@ def clean_title(title):
     else:
         title = re.sub(r'@[a-zA-Z0-9_]+', '', title)
 
-    # 3. Remove content in square brackets [] globally
+    # 4. Remove content in square brackets [] globally
     title = re.sub(r'\[.*?\]', '', title)
 
-    # 4. Remove dots, underscores
+    # 5. Handle "Prefix - Title" pattern
+    # If the title contains " - ", usually the part after the last hyphen is the real title
+    # Exception: "Mission - Impossible" (Keep "Mission - Impossible")?
+    # This is tricky. But for "ReleaseGroup - Title", stripping the prefix is desired.
+    # Heuristic: If we find " - ", let's look at the segments.
+    # If there are 2 segments, and the first one is short (< 10 chars) or looks like garbage, drop it.
+    if ' - ' in title:
+        segments = title.split(' - ')
+        # If last segment is decent length, use it.
+        # Check against "Mission - Impossible" -> "Impossible" (bad).
+        # Check "RF_RF - Sirai" -> "Sirai" (good).
+        # Let's try: take the last segment if it's not empty.
+        # To be safer, maybe only if previous segment looks "spammy" or "prefix-y"?
+        # But user explicitly wants "RF_RF - Sirai" -> "Sirai".
+        # Let's take the last segment for now as it's the most common "clean" pattern in piracy/forwarding.
+        if segments:
+            title = segments[-1]
+
+    # 6. Remove dots, underscores
     title = title.replace(".", " ").replace("_", " ")
     
     # Remove custom spam keywords

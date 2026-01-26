@@ -29,11 +29,26 @@ def clean_title(title):
     # 1. Remove URLs
     title = re.sub(r'https?://\S+', '', title)
 
-    # 2. Remove Telegram Handles (e.g. @ChannelName)
-    # Heuristic: Matches @Handle.
-    # If using underscore, assumes handle parts after _ are lowercase/numbers (common in handles).
-    # If an uppercase letter follows _, it's likely the start of the Title (e.g. @WMR_Maryan).
-    title = re.sub(r'@[a-zA-Z0-9]+(?:_[a-z0-9]+)*', '', title)
+    # 2. Handle Telegram Handles specifically
+    # If title starts with @, it's likely a handle-prefixed filename
+    if title.startswith('@'):
+        # Normalize separators to space for easier splitting, but keep track of parts
+        # Actually, let's split by common separators
+        parts = re.split(r'[ ._]+', title)
+
+        # Remove the first part (the main handle, e.g. @WMR)
+        if parts and parts[0].startswith('@'):
+            parts.pop(0)
+
+        # Heuristic: Remove subsequent parts if they are short (<=3 chars) and likely garbage/extension
+        # UNLESS it is the ONLY part left (don't delete the movie name if it's short like "Up")
+        while parts and len(parts) > 1 and len(parts[0]) <= 3:
+            parts.pop(0)
+
+        title = " ".join(parts)
+    else:
+        # Standard handle removal for mid-sentence handles
+        title = re.sub(r'@[a-zA-Z0-9_]+', '', title)
 
     # 3. Remove content in square brackets [] globally
     title = re.sub(r'\[.*?\]', '', title)

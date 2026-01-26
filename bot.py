@@ -6,13 +6,12 @@ from pyrogram import Client, filters, idle, utils
 from aiohttp import web
 
 # Monkeypatch Pyrogram to support 64-bit Channel IDs
-# This is required because newer Telegram Channel IDs exceed the legacy 32-bit range check in Pyrogram v2.
-# Original: -1002147483647
 utils.MIN_CHANNEL_ID = -1009999999999
 
 from config import API_ID, API_HASH, BOT_TOKEN, SOURCE_CHANNEL, TARGET_CHANNEL, LOG_CHANNEL
 from media_parser import parse_media_info
 from web_server import start_web_server
+from tmdb_client import TMDBClient
 
 # Configure logging
 logging.basicConfig(
@@ -33,6 +32,7 @@ if not BOT_TOKEN:
     sys.exit(1)
 
 app = Client("renamer_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+tmdb = TMDBClient()
 
 def get_file_name(message):
     if message.video:
@@ -67,9 +67,22 @@ async def handle_media(client, message):
 
         logger.info(f"Processing: {file_name}")
 
-        # Parse Media Info
+        # Parse Media Info (Local Regex)
         info = parse_media_info(file_name, caption)
         
+        # TMDB Enrichment
+        if info.title and len(info.title) > 2:
+            is_series = info.season is not None
+            tmdb_result = tmdb.search_media(info.title, info.year, is_series)
+
+            if tmdb_result:
+                logger.info(f"TMDB Found: {tmdb_result['title']} ({tmdb_result['year']})")
+                info.title = tmdb_result['title']
+                if tmdb_result['year']:
+                    info.year = tmdb_result['year']
+            else:
+                logger.info("TMDB search returned no results.")
+
         # Validation: If title seems too short or empty, it might be a failure
         if not info.title or len(info.title) < 2:
             error_msg = f"Failed to parse title for: {file_name}\nCaption: {caption}"
@@ -82,7 +95,6 @@ async def handle_media(client, message):
         logger.info(f"New Caption: {new_caption}")
         
         # Send to Target Channel
-        # Using send_video/document with file_id prevents re-uploading and removes forward tag
         sent = None
         file_id = get_file_id(message)
         

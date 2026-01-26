@@ -31,30 +31,50 @@ class TMDBClient:
                 return None
 
             # Filter/Find best match
-            # tmdbv3api might return a custom object list that behaves oddly with slicing
-            # safely convert to list
             results_list = list(results)
             best_match = results_list[0]
 
             # If year provided, try to find exact year match in top results
             if year:
                 for res in results_list[:3]: # Check top 3
-                    res_date = getattr(res, 'release_date', getattr(res, 'first_air_date', ''))
-                    if res_date and str(year) in res_date:
+                    # Safety check if res is dict or object
+                    if isinstance(res, dict):
+                         res_date = res.get('release_date') or res.get('first_air_date') or ''
+                    else:
+                         res_date = getattr(res, 'release_date', getattr(res, 'first_air_date', ''))
+
+                    if res_date and str(year) in str(res_date):
                         best_match = res
                         break
 
-            title = getattr(best_match, 'title', getattr(best_match, 'name', ''))
-            res_date = getattr(best_match, 'release_date', getattr(best_match, 'first_air_date', ''))
-            res_year = int(res_date.split('-')[0]) if res_date else year
+            # Safely extract attributes whether it's an object or dict
+            def get_attr(obj, attr, alt_attr=None):
+                if isinstance(obj, dict):
+                    val = obj.get(attr)
+                    if not val and alt_attr:
+                        val = obj.get(alt_attr)
+                    return val
+                else:
+                    return getattr(obj, attr, getattr(obj, alt_attr, '') if alt_attr else '')
+
+            title = get_attr(best_match, 'title', 'name')
+            res_date = get_attr(best_match, 'release_date', 'first_air_date')
+
+            # Handle year parsing safely
+            res_year = year
+            if res_date and isinstance(res_date, str) and '-' in res_date:
+                try:
+                    res_year = int(res_date.split('-')[0])
+                except ValueError:
+                    pass
 
             return {
                 "title": title,
                 "year": res_year,
-                "overview": getattr(best_match, 'overview', ''),
-                "id": best_match.id
+                "overview": get_attr(best_match, 'overview'),
+                "id": get_attr(best_match, 'id')
             }
 
         except Exception as e:
-            logger.error(f"TMDB Search Error: {e}")
+            logger.error(f"TMDB Search Error: {e}", exc_info=True)
             return None

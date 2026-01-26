@@ -5,6 +5,7 @@ import asyncio
 from pyrogram import Client, filters, idle, utils
 from pyrogram.errors import FloodWait
 from aiohttp import web
+from collections import deque
 
 # Monkeypatch Pyrogram to support 64-bit Channel IDs
 utils.MIN_CHANNEL_ID = -1009999999999
@@ -36,6 +37,10 @@ if not BOT_TOKEN:
 # This solves the issue of out-of-order forwarding for series batches.
 app = Client("renamer_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=1)
 tmdb = TMDBClient()
+
+# Message ID Cache for Deduplication
+# Stores the last 1000 processed message IDs
+processed_messages = deque(maxlen=1000)
 
 def get_file_name(message):
     if message.video:
@@ -69,6 +74,14 @@ async def send_with_flood_handling(func, *args, **kwargs):
 # Updated Filter: Removed ~filters.edited as it doesn't exist in Pyrogram v2 on_message
 @app.on_message(filters.chat(SOURCE_CHANNEL) & (filters.document | filters.video | filters.audio))
 async def handle_media(client, message):
+    # Deduplication check
+    if message.id in processed_messages:
+        logger.warning(f"Message {message.id} already processed. Skipping.")
+        return
+
+    # Add to cache immediately
+    processed_messages.append(message.id)
+
     try:
         file_name = get_file_name(message)
         caption = message.caption or ""

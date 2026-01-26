@@ -32,7 +32,9 @@ if not BOT_TOKEN:
     logger.error("BOT_TOKEN is missing.")
     sys.exit(1)
 
-app = Client("renamer_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+# Set workers=1 to ensure sequential processing (FIFO) of messages
+# This solves the issue of out-of-order forwarding for series batches.
+app = Client("renamer_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=1)
 tmdb = TMDBClient()
 
 def get_file_name(message):
@@ -64,7 +66,8 @@ async def send_with_flood_handling(func, *args, **kwargs):
         logger.error(f"Error in send_with_flood_handling: {e}")
         raise e
 
-@app.on_message(filters.chat(SOURCE_CHANNEL) & (filters.document | filters.video | filters.audio))
+# Updated Filter: Ignore edited messages to prevent double processing
+@app.on_message(filters.chat(SOURCE_CHANNEL) & (filters.document | filters.video | filters.audio) & ~filters.edited)
 async def handle_media(client, message):
     try:
         file_name = get_file_name(message)
@@ -85,15 +88,21 @@ async def handle_media(client, message):
         # TMDB Enrichment
         if info.title and len(info.title) > 2:
             is_series = info.season is not None
-            tmdb_result = tmdb.search_media(info.title, info.year, is_series)
 
-            if tmdb_result:
-                logger.info(f"TMDB Found: {tmdb_result['title']} ({tmdb_result['year']})")
-                info.title = tmdb_result['title']
-                if tmdb_result['year']:
-                    info.year = tmdb_result['year']
-            else:
-                logger.info("TMDB search returned no results.")
+            # Run blocking TMDB call in a thread executor to avoid blocking the event loop
+            try:
+                loop = asyncio.get_running_loop()
+                tmdb_result = await loop.run_in_executor(None, tmdb.search_media, info.title, info.year, is_series)
+
+                if tmdb_result:
+                    logger.info(f"TMDB Found: {tmdb_result['title']} ({tmdb_result['year']})")
+                    info.title = tmdb_result['title']
+                    if tmdb_result['year']:
+                        info.year = tmdb_result['year']
+                else:
+                    logger.info("TMDB search returned no results.")
+            except Exception as e:
+                logger.error(f"Error during TMDB lookup: {e}")
 
         # Validation: If title seems too short or empty, it might be a failure
         if not info.title or len(info.title) < 2:

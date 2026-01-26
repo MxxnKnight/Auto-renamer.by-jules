@@ -31,11 +31,14 @@ class TMDBClient:
                 return None
 
             # Filter/Find best match
-            best_match = results[0]
+            # tmdbv3api might return a custom object list that behaves oddly with slicing
+            # safely convert to list
+            results_list = list(results)
+            best_match = results_list[0]
 
             # If year provided, try to find exact year match in top results
             if year:
-                for res in results[:3]: # Check top 3
+                for res in results_list[:3]: # Check top 3
                     res_date = getattr(res, 'release_date', getattr(res, 'first_air_date', ''))
                     if res_date and str(year) in res_date:
                         best_match = res

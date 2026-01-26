@@ -66,8 +66,8 @@ async def send_with_flood_handling(func, *args, **kwargs):
         logger.error(f"Error in send_with_flood_handling: {e}")
         raise e
 
-# Updated Filter: Ignore edited messages to prevent double processing
-@app.on_message(filters.chat(SOURCE_CHANNEL) & (filters.document | filters.video | filters.audio) & ~filters.edited)
+# Updated Filter: Removed ~filters.edited as it doesn't exist in Pyrogram v2 on_message
+@app.on_message(filters.chat(SOURCE_CHANNEL) & (filters.document | filters.video | filters.audio))
 async def handle_media(client, message):
     try:
         file_name = get_file_name(message)

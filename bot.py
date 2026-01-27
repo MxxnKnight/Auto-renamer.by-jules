@@ -97,7 +97,7 @@ async def handle_media(client, message):
 
         # Parse Media Info (Local Regex)
         info = parse_media_info(file_name, caption)
-        logger.info(f"Regex Parsed Title: '{info.title}' Year: {info.year}")
+        logger.info(f"Regex Parsed Title: '{info.title}' Year: {info.year} S: {info.season} E: {info.episode}")
         
         # TMDB Enrichment
         if info.title and len(str(info.title)) > 2:
@@ -107,6 +107,17 @@ async def handle_media(client, message):
             try:
                 loop = asyncio.get_running_loop()
                 tmdb_result = await loop.run_in_executor(None, tmdb.search_media, info.title, info.year, is_series)
+
+                # Intelligent Fallback:
+                # If we thought it was a series (is_series=True) but found nothing...
+                # Try searching as a MOVIE. If found, it means our regex matched S/E falsely (e.g. "Conjuring").
+                if not tmdb_result and is_series:
+                    logger.info("TMDB: Series search failed. Trying as Movie fallback...")
+                    tmdb_result = await loop.run_in_executor(None, tmdb.search_media, info.title, info.year, False)
+                    if tmdb_result:
+                        logger.info("TMDB: Found as Movie! Clearing false positive Season/Episode.")
+                        info.season = None
+                        info.episode = None
 
                 if tmdb_result:
                     # Ensure title is a string to prevent 'builtin_function_or_method' len error

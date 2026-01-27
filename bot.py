@@ -14,6 +14,7 @@ from config import API_ID, API_HASH, BOT_TOKEN, SOURCE_CHANNEL, TARGET_CHANNEL, 
 from media_parser import parse_media_info
 from web_server import start_web_server
 from tmdb_client import TMDBClient
+from self_ping import ping_server
 
 # Configure logging
 logging.basicConfig(
@@ -188,6 +189,15 @@ async def main():
     site = web.TCPSite(runner, bind_address, port)
     await site.start()
     logger.info(f"Web Server running on port {port}")
+
+    # Start Self-Ping (if URL is available)
+    # Render sets RENDER_EXTERNAL_URL automatically for web services
+    ping_url = os.getenv("PING_URL") or os.getenv("RENDER_EXTERNAL_URL")
+    if ping_url:
+        # Append / if not present (optional, standardizing)
+        asyncio.create_task(ping_server(ping_url))
+    else:
+        logger.warning("No PING_URL or RENDER_EXTERNAL_URL found. Self-ping disabled.")
 
     # Start Bot
     logger.info("Starting Bot...")

@@ -71,7 +71,6 @@ async def send_with_flood_handling(func, *args, **kwargs):
         logger.error(f"Error in send_with_flood_handling: {e}")
         raise e
 
-# Updated Filter: Removed ~filters.edited as it doesn't exist in Pyrogram v2 on_message
 @app.on_message(filters.chat(SOURCE_CHANNEL) & (filters.document | filters.video | filters.audio))
 async def handle_media(client, message):
     # Deduplication check
@@ -99,7 +98,7 @@ async def handle_media(client, message):
         info = parse_media_info(file_name, caption)
         
         # TMDB Enrichment
-        if info.title and len(info.title) > 2:
+        if info.title and len(str(info.title)) > 2:
             is_series = info.season is not None
 
             # Run blocking TMDB call in a thread executor to avoid blocking the event loop
@@ -109,7 +108,8 @@ async def handle_media(client, message):
 
                 if tmdb_result:
                     logger.info(f"TMDB Found: {tmdb_result['title']} ({tmdb_result['year']})")
-                    info.title = tmdb_result['title']
+                    # Ensure title is a string to prevent 'builtin_function_or_method' len error
+                    info.title = str(tmdb_result['title'])
                     if tmdb_result['year']:
                         info.year = tmdb_result['year']
                 else:
@@ -118,7 +118,9 @@ async def handle_media(client, message):
                 logger.error(f"Error during TMDB lookup: {e}")
 
         # Validation: If title seems too short or empty, it might be a failure
-        if not info.title or len(info.title) < 2:
+        # Force string conversion to prevent len() error on non-string types
+        final_title = str(info.title) if info.title else ""
+        if len(final_title) < 2:
             error_msg = f"Failed to parse title for: {file_name}\nCaption: {caption}"
             logger.warning(error_msg)
             if LOG_CHANNEL:

@@ -93,10 +93,11 @@ async def handle_media(client, message):
             else:
                 file_name = "Unknown_File"
 
-        logger.info(f"Processing: {file_name}")
+        logger.info(f"Received File: {file_name}")
 
         # Parse Media Info (Local Regex)
         info = parse_media_info(file_name, caption)
+        logger.info(f"Regex Parsed Title: '{info.title}' Year: {info.year}")
         
         # TMDB Enrichment
         if info.title and len(str(info.title)) > 2:
@@ -108,13 +109,10 @@ async def handle_media(client, message):
                 tmdb_result = await loop.run_in_executor(None, tmdb.search_media, info.title, info.year, is_series)
 
                 if tmdb_result:
-                    logger.info(f"TMDB Found: {tmdb_result['title']} ({tmdb_result['year']})")
                     # Ensure title is a string to prevent 'builtin_function_or_method' len error
                     info.title = str(tmdb_result['title'])
                     if tmdb_result['year']:
                         info.year = tmdb_result['year']
-                else:
-                    logger.info("TMDB search returned no results.")
             except Exception as e:
                 logger.error(f"Error during TMDB lookup: {e}")
 
@@ -129,7 +127,7 @@ async def handle_media(client, message):
             return
 
         new_caption = str(info)
-        logger.info(f"New Caption: {new_caption}")
+        logger.info(f"Final Caption: {new_caption}")
         
         # Send to Target Channel
         sent = None

@@ -13,12 +13,15 @@ class TMDBClient:
             self.tmdb.language = 'en'
             self.movie_api = Movie()
             self.tv_api = TV()
+            logger.info("TMDB Integration Enabled.")
         else:
             logger.warning("TMDB_API_KEY not set. TMDB enrichment disabled.")
 
     def search_media(self, query, year=None, is_series=False):
         if not self.api_key or not query:
             return None
+
+        logger.info(f"TMDB Search Query: '{query}' (Year: {year}, IsSeries: {is_series})")
 
         try:
             results = []
@@ -28,6 +31,7 @@ class TMDBClient:
                 results = self.movie_api.search(query)
 
             if not results:
+                logger.info("TMDB: No results found.")
                 return None
 
             # Filter/Find best match
@@ -45,6 +49,7 @@ class TMDBClient:
 
                     if res_date and str(year) in str(res_date):
                         best_match = res
+                        logger.info(f"TMDB: Found year match: {res_date}")
                         break
 
             # Safely extract attributes whether it's an object or dict
@@ -68,12 +73,14 @@ class TMDBClient:
                 except ValueError:
                     pass
 
-            return {
+            result_data = {
                 "title": title,
                 "year": res_year,
                 "overview": get_attr(best_match, 'overview'),
                 "id": get_attr(best_match, 'id')
             }
+            logger.info(f"TMDB Success: Found '{title}' ({res_year})")
+            return result_data
 
         except Exception as e:
             logger.error(f"TMDB Search Error: {e}", exc_info=True)

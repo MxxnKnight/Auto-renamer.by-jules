@@ -44,34 +44,24 @@ def clean_title(title):
     title = re.sub(r'#\w+', '', title)
 
     # 3. Handle Telegram Handles
-    if title.startswith('@'):
+    # Priority: Remove well-formed handles first (e.g., @Rocky_links)
+    title = re.sub(r'@[a-zA-Z0-9_]+', '', title)
+
+    # Then handle residual @ parts if any (like @mobile_mm.maryan where . connects)
+    if title.strip().startswith('@'):
         parts = re.split(r'[ ._]+', title)
         if parts and parts[0].startswith('@'):
             parts.pop(0)
         while parts and len(parts) > 1 and len(parts[0]) <= 3:
             parts.pop(0)
         title = " ".join(parts)
-    else:
-        title = re.sub(r'@[a-zA-Z0-9_]+', '', title)
 
     # 4. Remove content in square brackets [] globally
     title = re.sub(r'\[.*?\]', '', title)
 
     # 5. Handle "Prefix - Title" pattern
-    # If the title contains " - ", usually the part after the last hyphen is the real title
-    # Exception: "Mission - Impossible" (Keep "Mission - Impossible")?
-    # This is tricky. But for "ReleaseGroup - Title", stripping the prefix is desired.
-    # Heuristic: If we find " - ", let's look at the segments.
-    # If there are 2 segments, and the first one is short (< 10 chars) or looks like garbage, drop it.
     if ' - ' in title:
         segments = title.split(' - ')
-        # If last segment is decent length, use it.
-        # Check against "Mission - Impossible" -> "Impossible" (bad).
-        # Check "RF_RF - Sirai" -> "Sirai" (good).
-        # Let's try: take the last segment if it's not empty.
-        # To be safer, maybe only if previous segment looks "spammy" or "prefix-y"?
-        # But user explicitly wants "RF_RF - Sirai" -> "Sirai".
-        # Let's take the last segment for now as it's the most common "clean" pattern in piracy/forwarding.
         if segments:
             title = segments[-1]
 
@@ -101,26 +91,48 @@ def extract_resolution(text):
     return None
 
 def extract_season_episode(text):
-    match = re.search(r'S(\d+)\s?E(\d+)', text, re.IGNORECASE)
+    # Regex Improvement:
+    # 1. Greedy \d+ for episode to allow backtracking against the Lookahead
+
+    # Priority 0: Merged Resolution (S01E01720p)
+    # Matches S01E01 followed by 720p
+    match = re.search(r'S(\d+)\s?E(\d+)(?=(\d{3,4}p))', text, re.IGNORECASE)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+
+    # Priority 0.5: Merged Resolution Digits (S01E01720) - ambiguous but best effort
+    # Matches S01E01 followed by 720 and end/boundary
+    match = re.search(r'S(\d+)\s?E(\d+)(?=(\d{3,4}(?!\d)))', text, re.IGNORECASE)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+
+    # Priority 1: S01E01 format (Standard)
+    # Rejects S01E720p because 720 is followed by p
+    match = re.search(r'S(\d{1,2})\s?E(\d{1,3})(?!\d|p)', text, re.IGNORECASE)
     if match:
         return int(match.group(1)), int(match.group(2))
     
-    match = re.search(r'(\d+)x(\d+)', text, re.IGNORECASE)
+    # Priority 2: 1x01 format
+    match = re.search(r'(\d{1,2})x(\d{1,3})(?!\d|p)', text, re.IGNORECASE)
     if match:
         return int(match.group(1)), int(match.group(2))
     
-    match = re.search(r'(?:Episode|Ep)\s?\.?(\d+)', text, re.IGNORECASE)
+    # Priority 3: Episode 1 / Ep 1
+    match = re.search(r'(?:Episode|Ep)\s?\.?(\d{1,4})', text, re.IGNORECASE)
     if match:
         return None, int(match.group(1))
         
-    match = re.search(r'\s-\s(\d+)(?:\s|\[|\.|$)', text)
+    # Priority 4: " - 123 " (Anime style)
+    match = re.search(r'\s-\s(\d{1,4})(?:\s|\[|\.|$)', text)
     if match:
         return None, int(match.group(1))
 
+    # Priority 5: Episode Number: 1
     match = re.search(r'Episode Number:\s?(\d+)', text, re.IGNORECASE)
     if match:
         return None, int(match.group(1))
 
+    # Priority 6: 1/23 (fractions)
     match = re.search(r'(\d+)/(\d+)', text)
     if match and "episode" in text.lower():
          return None, int(match.group(1))
@@ -219,7 +231,7 @@ def parse_media_info(filename, caption=None):
     
     year = int(found_year_str) if found_year_str else None
     title_part = raw_text
-    meta_part = ""
+    meta_part = "" # Fixed scope issue
     
     if split_idx != -1:
         title_part = raw_text[:split_idx]
@@ -243,8 +255,5 @@ def parse_media_info(filename, caption=None):
     clean_t = clean_title(title_part)
     if not clean_t:
         clean_t = clean_title(raw_text)
-
-    # Remove details from title if they leaked in (rare but possible)
-    # (Simplified for now as clean_title removes most junk)
 
     return MediaInfo(clean_t, year, resolution, season, episode, source, audio, codec)

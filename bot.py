@@ -43,6 +43,10 @@ tmdb = TMDBClient()
 # Stores the last 1000 processed message IDs
 processed_messages = deque(maxlen=1000)
 
+# Global Processing Queue for Strict Sequential Processing
+# Initialized in main() to ensure loop binding
+processing_queue = None
+
 def get_file_name(message):
     if message.video:
         return message.video.file_name
@@ -71,6 +75,31 @@ async def send_with_flood_handling(func, *args, **kwargs):
     except Exception as e:
         logger.error(f"Error in send_with_flood_handling: {e}")
         raise e
+
+async def worker():
+    logger.info("Worker started. Waiting for tasks...")
+    while True:
+        try:
+            # Get task from queue
+            client, message, search_type = await processing_queue.get()
+
+            try:
+                logger.info(f"Worker picked up message: {message.id} ({search_type})")
+
+                # Process the request
+                await process_media_request(client, message, search_type)
+
+                # Rate limiting / Delay between files
+                # User requested "no need to rush, you can allow rate limit time delay"
+                logger.info("Worker sleeping for 3 seconds...")
+                await asyncio.sleep(3)
+            finally:
+                processing_queue.task_done()
+
+        except Exception as e:
+            logger.error(f"Worker crashed: {e}", exc_info=True)
+            # Prevent worker from dying completely, just restart loop
+            await asyncio.sleep(5)
 
 async def process_media_request(client, message, search_type):
     # Deduplication check: using (chat_id, message_id) tuple
@@ -181,18 +210,30 @@ async def process_media_request(client, message, search_type):
 if SOURCE_MOVIES_CHANNEL:
     @app.on_message(filters.chat(SOURCE_MOVIES_CHANNEL) & (filters.document | filters.video | filters.audio))
     async def handle_movies(client, message):
-        await process_media_request(client, message, 'movie')
+        if processing_queue:
+            logger.info(f"Queued Movie Request: {message.id}")
+            await processing_queue.put((client, message, 'movie'))
+        else:
+            logger.error("Processing Queue not initialized!")
 else:
     logger.warning("SOURCE_MOVIES_CHANNEL not set. Movie monitoring disabled.")
 
 if SOURCE_SERIES_CHANNEL:
     @app.on_message(filters.chat(SOURCE_SERIES_CHANNEL) & (filters.document | filters.video | filters.audio))
     async def handle_series(client, message):
-        await process_media_request(client, message, 'series')
+        if processing_queue:
+            logger.info(f"Queued Series Request: {message.id}")
+            await processing_queue.put((client, message, 'series'))
+        else:
+            logger.error("Processing Queue not initialized!")
 else:
     logger.warning("SOURCE_SERIES_CHANNEL not set. Series monitoring disabled.")
 
 async def main():
+    global processing_queue
+    # Initialize Queue with the running event loop
+    processing_queue = asyncio.Queue()
+
     # Start Web Server
     logger.info("Starting Web Server...")
     web_app = await start_web_server()
@@ -217,6 +258,9 @@ async def main():
     logger.info("Starting Bot...")
     await app.start()
     logger.info("Bot started!")
+
+    # Start Worker Task
+    asyncio.create_task(worker())
 
     # Idle to keep the script running
     await idle()

@@ -124,7 +124,8 @@ def extract_season_episode(text):
         return None, int(match.group(1))
         
     # Priority 4: " - 123 " (Anime style)
-    match = re.search(r'\s-\s(\d{1,4})(?:\s|\[|\.|$)', text)
+    # Fixed to avoid matching floats like " - 2.6GB" or " - 5.1"
+    match = re.search(r'\s-\s(\d{1,4})(?=\s|\[|$|(?:\.(?!\d)))', text)
     if match:
         return None, int(match.group(1))
 
@@ -306,5 +307,10 @@ def parse_media_info(filename, caption=None, search_type=None):
     source = extract_source(full_meta_text) or extract_source(raw_text)
     codec = extract_codec(full_meta_text) or extract_codec(raw_text)
     audio = extract_audio(full_meta_text) or extract_audio(raw_text)
+
+    # Force strict Movie rules: No S/E logic allowed
+    if search_type == 'movie':
+        season = None
+        episode = None
 
     return MediaInfo(clean_t, year, resolution, season, episode, source, audio, codec)

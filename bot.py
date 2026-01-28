@@ -43,6 +43,13 @@ tmdb = TMDBClient()
 # Stores the last 1000 processed message IDs
 processed_messages = deque(maxlen=1000)
 
+# Pending Messages Set (for fast O(1) lookups before queueing)
+pending_messages = set()
+
+# Global Processing Queue for Strict Sequential Processing
+# Initialized in main() to ensure loop binding
+processing_queue = None
+
 def get_file_name(message):
     if message.video:
         return message.video.file_name
@@ -72,9 +79,39 @@ async def send_with_flood_handling(func, *args, **kwargs):
         logger.error(f"Error in send_with_flood_handling: {e}")
         raise e
 
+async def worker():
+    logger.info("Worker started. Waiting for tasks...")
+    while True:
+        try:
+            # Get task from queue
+            client, message, search_type = await processing_queue.get()
+
+            try:
+                logger.info(f"Worker picked up message: {message.id} ({search_type})")
+
+                # Process the request
+                await process_media_request(client, message, search_type)
+
+                # Rate limiting / Delay between files
+                # User requested "no need to rush, you can allow rate limit time delay"
+                logger.info("Worker sleeping for 3 seconds...")
+                await asyncio.sleep(3)
+            finally:
+                processing_queue.task_done()
+
+        except Exception as e:
+            logger.error(f"Worker crashed: {e}", exc_info=True)
+            # Prevent worker from dying completely, just restart loop
+            await asyncio.sleep(5)
+
 async def process_media_request(client, message, search_type):
-    # Deduplication check: using (chat_id, message_id) tuple
     unique_id = (message.chat.id, message.id)
+
+    # Remove from pending, add to processed
+    if unique_id in pending_messages:
+        pending_messages.remove(unique_id)
+
+    # Redundant check in case pending logic was bypassed or race condition
     if unique_id in processed_messages:
         logger.warning(f"Message {unique_id} already processed. Skipping.")
         return
@@ -96,6 +133,7 @@ async def process_media_request(client, message, search_type):
         logger.info(f"Received File ({search_type}): {file_name}")
 
         # Parse Media Info (Local Regex) with search_type hint
+        # search_type argument ensures 'movie' files get Season/Episode stripped
         info = parse_media_info(file_name, caption, search_type=search_type)
         logger.info(f"Regex Parsed Title: '{info.title}' Year: {info.year} S: {info.season} E: {info.episode}")
         
@@ -159,7 +197,12 @@ async def process_media_request(client, message, search_type):
             )
             
         if sent:
-            logger.info(f"Sent to target: {sent.id}")
+            logger.info(f"Sent to target: {sent.id} (Channel ID: {TARGET_CHANNEL})")
+
+            # Double check we didn't send to source
+            if sent.chat.id == message.chat.id:
+                 logger.critical("CRITICAL: Bot sent file back to Source Channel! Infinite Loop Risk!")
+
             # Delete original message
             try:
                 await send_with_flood_handling(message.delete)
@@ -181,18 +224,50 @@ async def process_media_request(client, message, search_type):
 if SOURCE_MOVIES_CHANNEL:
     @app.on_message(filters.chat(SOURCE_MOVIES_CHANNEL) & (filters.document | filters.video | filters.audio))
     async def handle_movies(client, message):
-        await process_media_request(client, message, 'movie')
+        # Ignore own messages
+        if message.from_user and message.from_user.is_self:
+            return
+
+        unique_id = (message.chat.id, message.id)
+        if unique_id in pending_messages or unique_id in processed_messages:
+            logger.info(f"Ignoring duplicate/pending message: {message.id}")
+            return
+
+        if processing_queue:
+            logger.info(f"Queued Movie Request: {message.id}")
+            pending_messages.add(unique_id)
+            await processing_queue.put((client, message, 'movie'))
+        else:
+            logger.error("Processing Queue not initialized!")
 else:
     logger.warning("SOURCE_MOVIES_CHANNEL not set. Movie monitoring disabled.")
 
 if SOURCE_SERIES_CHANNEL:
     @app.on_message(filters.chat(SOURCE_SERIES_CHANNEL) & (filters.document | filters.video | filters.audio))
     async def handle_series(client, message):
-        await process_media_request(client, message, 'series')
+        # Ignore own messages
+        if message.from_user and message.from_user.is_self:
+            return
+
+        unique_id = (message.chat.id, message.id)
+        if unique_id in pending_messages or unique_id in processed_messages:
+            logger.info(f"Ignoring duplicate/pending message: {message.id}")
+            return
+
+        if processing_queue:
+            logger.info(f"Queued Series Request: {message.id}")
+            pending_messages.add(unique_id)
+            await processing_queue.put((client, message, 'series'))
+        else:
+            logger.error("Processing Queue not initialized!")
 else:
     logger.warning("SOURCE_SERIES_CHANNEL not set. Series monitoring disabled.")
 
 async def main():
+    global processing_queue
+    # Initialize Queue with the running event loop
+    processing_queue = asyncio.Queue()
+
     # Start Web Server
     logger.info("Starting Web Server...")
     web_app = await start_web_server()
@@ -217,6 +292,9 @@ async def main():
     logger.info("Starting Bot...")
     await app.start()
     logger.info("Bot started!")
+
+    # Start Worker Task
+    asyncio.create_task(worker())
 
     # Idle to keep the script running
     await idle()

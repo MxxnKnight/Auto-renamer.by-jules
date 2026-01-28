@@ -10,7 +10,7 @@ from collections import deque
 # Monkeypatch Pyrogram to support 64-bit Channel IDs
 utils.MIN_CHANNEL_ID = -1009999999999
 
-from config import API_ID, API_HASH, BOT_TOKEN, SOURCE_CHANNEL, TARGET_CHANNEL, LOG_CHANNEL
+from config import API_ID, API_HASH, BOT_TOKEN, SOURCE_MOVIES_CHANNEL, SOURCE_SERIES_CHANNEL, TARGET_CHANNEL, LOG_CHANNEL
 from media_parser import parse_media_info
 from web_server import start_web_server
 from tmdb_client import TMDBClient
@@ -72,8 +72,7 @@ async def send_with_flood_handling(func, *args, **kwargs):
         logger.error(f"Error in send_with_flood_handling: {e}")
         raise e
 
-@app.on_message(filters.chat(SOURCE_CHANNEL) & (filters.document | filters.video | filters.audio))
-async def handle_media(client, message):
+async def process_media_request(client, message, search_type):
     # Deduplication check
     if message.id in processed_messages:
         logger.warning(f"Message {message.id} already processed. Skipping.")
@@ -93,37 +92,27 @@ async def handle_media(client, message):
             else:
                 file_name = "Unknown_File"
 
-        logger.info(f"Received File: {file_name}")
+        logger.info(f"Received File ({search_type}): {file_name}")
 
-        # Parse Media Info (Local Regex)
-        info = parse_media_info(file_name, caption)
+        # Parse Media Info (Local Regex) with search_type hint
+        info = parse_media_info(file_name, caption, search_type=search_type)
         logger.info(f"Regex Parsed Title: '{info.title}' Year: {info.year} S: {info.season} E: {info.episode}")
         
         # TMDB Enrichment
         if info.title and len(str(info.title)) > 2:
-            is_series = info.season is not None
+            is_series_search = (search_type == 'series')
 
             # Run blocking TMDB call in a thread executor to avoid blocking the event loop
             try:
                 loop = asyncio.get_running_loop()
-                tmdb_result = await loop.run_in_executor(None, tmdb.search_media, info.title, info.year, is_series)
-
-                # Intelligent Fallback:
-                # If we thought it was a series (is_series=True) but found nothing...
-                # Try searching as a MOVIE. If found, it means our regex matched S/E falsely (e.g. "Conjuring").
-                if not tmdb_result and is_series:
-                    logger.info("TMDB: Series search failed. Trying as Movie fallback...")
-                    tmdb_result = await loop.run_in_executor(None, tmdb.search_media, info.title, info.year, False)
-                    if tmdb_result:
-                        logger.info("TMDB: Found as Movie! Clearing false positive Season/Episode.")
-                        info.season = None
-                        info.episode = None
+                tmdb_result = await loop.run_in_executor(None, tmdb.search_media, info.title, info.year, is_series_search)
 
                 if tmdb_result:
                     # Ensure title is a string to prevent 'builtin_function_or_method' len error
                     info.title = str(tmdb_result['title'])
                     if tmdb_result['year']:
                         info.year = tmdb_result['year']
+                    # Use overview if needed, but not adding to caption currently
             except Exception as e:
                 logger.error(f"Error during TMDB lookup: {e}")
 
@@ -186,6 +175,21 @@ async def handle_media(client, message):
                 await send_with_flood_handling(client.send_message, LOG_CHANNEL, f"Error processing message: {str(e)}")
             except Exception as log_error:
                 logger.error(f"Failed to send error to LOG_CHANNEL: {log_error}")
+
+# Register Handlers conditionally
+if SOURCE_MOVIES_CHANNEL:
+    @app.on_message(filters.chat(SOURCE_MOVIES_CHANNEL) & (filters.document | filters.video | filters.audio))
+    async def handle_movies(client, message):
+        await process_media_request(client, message, 'movie')
+else:
+    logger.warning("SOURCE_MOVIES_CHANNEL not set. Movie monitoring disabled.")
+
+if SOURCE_SERIES_CHANNEL:
+    @app.on_message(filters.chat(SOURCE_SERIES_CHANNEL) & (filters.document | filters.video | filters.audio))
+    async def handle_series(client, message):
+        await process_media_request(client, message, 'series')
+else:
+    logger.warning("SOURCE_SERIES_CHANNEL not set. Series monitoring disabled.")
 
 async def main():
     # Start Web Server

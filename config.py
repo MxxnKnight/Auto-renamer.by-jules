@@ -17,7 +17,8 @@ def parse_channel(val):
     except ValueError:
         return val
 
-SOURCE_CHANNEL = parse_channel(os.getenv("SOURCE_CHANNEL"))
+SOURCE_MOVIES_CHANNEL = parse_channel(os.getenv("SOURCE_MOVIES_CHANNEL"))
+SOURCE_SERIES_CHANNEL = parse_channel(os.getenv("SOURCE_SERIES_CHANNEL"))
 TARGET_CHANNEL = parse_channel(os.getenv("TARGET_CHANNEL"))
 LOG_CHANNEL = parse_channel(os.getenv("LOG_CHANNEL")) # For error notifications
 

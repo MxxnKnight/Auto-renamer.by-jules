@@ -1,4 +1,10 @@
 import unittest
+import sys
+import os
+
+# Add parent directory to path to import media_parser
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from media_parser import parse_media_info
 
 class TestParser(unittest.TestCase):

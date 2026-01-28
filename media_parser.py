@@ -1,4 +1,5 @@
 import re
+import os
 from config import SPAM_KEYWORDS
 
 class MediaInfo:
@@ -224,8 +225,13 @@ def find_metadata_split(text):
         
     return -1, None
 
-def parse_media_info(filename, caption=None):
-    raw_text = filename
+def parse_media_info(filename, caption=None, search_type=None):
+    # Strip extension if present
+    base_name, ext = os.path.splitext(filename)
+    if ext.lower() in ['.mkv', '.mp4', '.avi', '.flv', '.mov', '.wmv', '.webm', '.mpg', '.mpeg', '.3gp']:
+        raw_text = base_name
+    else:
+        raw_text = filename
     
     split_idx, found_year_str = find_metadata_split(raw_text)
     
@@ -241,19 +247,64 @@ def parse_media_info(filename, caption=None):
              meta_part = raw_text[split_idx:]
     
     # Combine caption and meta_part for extra detail extraction
-    full_meta_text = (meta_part + " " + (caption or "")).strip()
+    # Use rstrip() to avoid removing leading whitespace from meta_part (crucial for " - Ep" regex)
+    full_meta_text = (meta_part + " " + (caption or "")).rstrip()
 
     resolution = extract_resolution(full_meta_text) or extract_resolution(raw_text) or "720p"
     season, episode = extract_season_episode(full_meta_text) or extract_season_episode(raw_text) or (None, None)
     
+    # Clean Title
+    clean_t = clean_title(title_part)
+    # Only fallback to raw_text if we didn't find a split
+    if not clean_t:
+        if split_idx == -1:
+            clean_t = clean_title(raw_text)
+        elif split_idx == 0 and found_year_str:
+            # Special case: The filename starts with a Year (e.g. "1917.mkv" or "2012.mkv")
+            # In this case, the Year is likely the Title.
+            clean_t = found_year_str
+
+    # Fallback: If title is empty or too short, try to parse from Caption
+    if (not clean_t or len(clean_t) < 2) and caption:
+        cap_split_idx, cap_year_str = find_metadata_split(caption)
+
+        if cap_split_idx != -1:
+            cap_title_part = caption[:cap_split_idx]
+        else:
+            # If no metadata split found in caption, assume the whole caption is the title
+            # This helps with cases like "One Piece 1015" where 1015 isn't caught by standard regex
+            cap_title_part = caption
+
+        clean_t_cap = clean_title(cap_title_part)
+        if len(clean_t_cap) >= 2:
+            clean_t = clean_t_cap
+            # If we switched to caption for title, we might want to trust caption for Year too
+            if cap_year_str:
+                year = int(cap_year_str)
+
+    # Aggressive Series Logic
+    # If search_type is series, and we didn't find an episode via standard regex,
+    # try to find a standalone number at the end of the title/text.
+    if search_type == 'series' and episode is None:
+        # Look for trailing number in the cleaned title
+        # e.g. "One Piece 236" -> title="One Piece", ep=236
+
+        # Regex for trailing number: spaces, then digits, then end of string
+        match = re.search(r'\s(\d{1,4})$', clean_t)
+        if match:
+            found_ep = int(match.group(1))
+            # Potential Title remainder
+            potential_title = clean_t[:match.start()].strip()
+
+            # Safety Check: Title shouldn't be empty or just symbols
+            if len(potential_title) >= 2:
+                episode = found_ep
+                season = 1 # Default to S01
+                clean_t = potential_title
+
     # Extract new fields
     source = extract_source(full_meta_text) or extract_source(raw_text)
     codec = extract_codec(full_meta_text) or extract_codec(raw_text)
     audio = extract_audio(full_meta_text) or extract_audio(raw_text)
-
-    # Clean Title
-    clean_t = clean_title(title_part)
-    if not clean_t:
-        clean_t = clean_title(raw_text)
 
     return MediaInfo(clean_t, year, resolution, season, episode, source, audio, codec)

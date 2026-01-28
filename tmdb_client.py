@@ -38,6 +38,11 @@ class TMDBClient:
             results_list = list(results)
             best_match = results_list[0]
 
+            # Check if best_match is a string (indicates malformed result or iterating keys)
+            if isinstance(best_match, str):
+                logger.warning(f"TMDB returned a string '{best_match}' instead of an object. Likely iterating keys of a malformed response.")
+                return None
+
             # If year provided, try to find exact year match in top results
             if year:
                 for res in results_list[:3]: # Check top 3
@@ -54,13 +59,21 @@ class TMDBClient:
 
             # Safely extract attributes whether it's an object or dict
             def get_attr(obj, attr, alt_attr=None):
+                val = None
                 if isinstance(obj, dict):
                     val = obj.get(attr)
                     if not val and alt_attr:
                         val = obj.get(alt_attr)
-                    return val
                 else:
-                    return getattr(obj, attr, getattr(obj, alt_attr, '') if alt_attr else '')
+                    val = getattr(obj, attr, None)
+                    if val is None and alt_attr:
+                        val = getattr(obj, alt_attr, None)
+
+                # Prevent returning methods (e.g. str.title)
+                if callable(val):
+                    return None
+
+                return val if val is not None else ''
 
             title = get_attr(best_match, 'title', 'name')
             res_date = get_attr(best_match, 'release_date', 'first_air_date')

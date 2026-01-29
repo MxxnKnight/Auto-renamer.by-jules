@@ -39,6 +39,9 @@ if not BOT_TOKEN:
 app = Client("renamer_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=1)
 tmdb = TMDBClient()
 
+# Global Deduplication Set
+processed_file_ids = set()
+
 def get_file_name(message):
     if message.video:
         return message.video.file_name
@@ -189,6 +192,19 @@ if SOURCE_MOVIES_CHANNEL:
         if message.sender_chat and message.sender_chat.id == TARGET_CHANNEL:
             return
 
+        # Deduplication Check
+        file_id = get_file_id(message)
+        if file_id in processed_file_ids:
+            logger.info(f"Skipping duplicate file: {file_id}")
+            return
+
+        if file_id:
+            processed_file_ids.add(file_id)
+
+            # Optional: Clear cache if too big
+            if len(processed_file_ids) > 10000:
+                processed_file_ids.clear()
+
         logger.info(f"Directly processing Movie Request: {message.id}")
         await process_media_request(client, message, 'movie')
 
@@ -211,6 +227,19 @@ if SOURCE_SERIES_CHANNEL:
             return
         if message.sender_chat and message.sender_chat.id == TARGET_CHANNEL:
             return
+
+        # Deduplication Check
+        file_id = get_file_id(message)
+        if file_id in processed_file_ids:
+            logger.info(f"Skipping duplicate file: {file_id}")
+            return
+
+        if file_id:
+            processed_file_ids.add(file_id)
+
+            # Optional: Clear cache if too big
+            if len(processed_file_ids) > 10000:
+                processed_file_ids.clear()
 
         logger.info(f"Directly processing Series Request: {message.id}")
         await process_media_request(client, message, 'series')

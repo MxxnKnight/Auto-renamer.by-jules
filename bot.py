@@ -39,8 +39,9 @@ if not BOT_TOKEN:
 app = Client("renamer_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=1)
 tmdb = TMDBClient()
 
-# GLOBAL FILE DEDUPE (Unique IDs)
-processed_unique_ids = set()
+# GLOBAL DEDUPLICATION CACHES
+seen_message_ids = set()
+seen_content_keys = set()
 
 # STEP 1: ADD THIS HELPER (GLOBAL)
 def trace(message):
@@ -111,6 +112,25 @@ async def process_media_request(client, message, search_type):
         # FIX: One Piece Anime Year Force
         if info.title and info.title.lower() == "one piece" and not info.year:
             info.year = 1999
+
+        # CONTENT KEY DEDUPLICATION
+        content_key = None
+        if search_type == 'movie':
+            content_key = f"movie:{str(info.title).lower()}:{info.year}"
+        elif search_type == 'series':
+            content_key = f"series:{str(info.title).lower()}:s{info.season or 1}:e{info.episode}"
+
+        if content_key:
+            if content_key in seen_content_keys:
+                logger.warning(f"[CONTENT-SKIP] Already sent {content_key} | {trace(message)}")
+                return
+
+            seen_content_keys.add(content_key)
+
+            # Memory Safety for Content Keys
+            if len(seen_content_keys) > 5000:
+                seen_content_keys.clear()
+                logger.warning("seen_content_keys cleared to free memory")
 
         logger.info(f"Regex Parsed Title: '{info.title}' Year: {info.year} S: {info.season} E: {info.episode}")
         
@@ -211,6 +231,11 @@ async def process_media_request(client, message, search_type):
 if SOURCE_MOVIES_CHANNEL:
     @app.on_message(filters.chat(SOURCE_MOVIES_CHANNEL) & (filters.document | filters.video | filters.audio))
     async def handle_movies(client, message):
+        # MESSAGE ID DEDUPLICATION (Short-term)
+        if message.id in seen_message_ids:
+            return
+        seen_message_ids.add(message.id)
+
         # HARD BLOCK TARGET CHANNEL
         if message.chat.id == TARGET_CHANNEL:
             return
@@ -225,24 +250,6 @@ if SOURCE_MOVIES_CHANNEL:
         if message.sender_chat and message.sender_chat.id == TARGET_CHANNEL:
             return
 
-        # Deduplication Check (UNIQUE ID)
-        unique_id = get_unique_id(message)
-
-        if not unique_id:
-            return
-
-        if unique_id in processed_unique_ids:
-            logger.info(f"[DUPLICATE-SKIP] unique_id already seen | {trace(message)}")
-            return
-
-        # Mark as processed immediately
-        processed_unique_ids.add(unique_id)
-
-        # Step 6: Memory safety
-        if len(processed_unique_ids) > 10000:
-            processed_unique_ids.clear()
-            logger.warning("processed_unique_ids cleared to free memory")
-
         logger.info(f"Directly processing Movie Request: {message.id}")
         await process_media_request(client, message, 'movie')
 
@@ -256,6 +263,11 @@ if SOURCE_SERIES_CHANNEL:
         & (filters.document | filters.video | filters.audio)
     )
     async def handle_series(client, message):
+        # MESSAGE ID DEDUPLICATION (Short-term)
+        if message.id in seen_message_ids:
+            return
+        seen_message_ids.add(message.id)
+
         # STEP 3: ADD ENTRY LOG (SERIES HANDLER)
         logger.warning(f"[ENTRY] Series handler triggered | {trace(message)}")
 
@@ -272,25 +284,6 @@ if SOURCE_SERIES_CHANNEL:
             return
         if message.sender_chat and message.sender_chat.id == TARGET_CHANNEL:
             return
-
-        # Deduplication Check (UNIQUE ID)
-        unique_id = get_unique_id(message)
-
-        if not unique_id:
-            logger.error(f"[NO-UNIQUE-ID] {trace(message)}")
-            return
-
-        if unique_id in processed_unique_ids:
-            logger.error(f"[DUPLICATE-SKIP] unique_id already seen | {trace(message)}")
-            return
-
-        logger.info(f"[DEDUP-OK] New file accepted | {trace(message)}")
-        processed_unique_ids.add(unique_id)
-
-        # Step 6: Memory safety
-        if len(processed_unique_ids) > 10000:
-            processed_unique_ids.clear()
-            logger.warning("processed_unique_ids cleared to free memory")
 
         logger.info(f"Directly processing Series Request: {message.id}")
         await process_media_request(client, message, 'series')

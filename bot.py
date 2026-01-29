@@ -239,7 +239,6 @@ if SOURCE_SERIES_CHANNEL:
     @app.on_message(
         filters.chat(SOURCE_SERIES_CHANNEL)
         & (filters.document | filters.video | filters.audio)
-        & ~filters.edited
     )
     async def handle_series(client, message):
         # STEP 3: ADD ENTRY LOG (SERIES HANDLER)

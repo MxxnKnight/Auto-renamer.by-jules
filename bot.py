@@ -107,6 +107,11 @@ async def process_media_request(client, message, search_type):
         # Parse Media Info (Local Regex) with search_type hint
         # search_type argument ensures 'movie' files get Season/Episode stripped
         info = parse_media_info(file_name, caption, search_type=search_type)
+
+        # FIX: One Piece Anime Year Force
+        if info.title and info.title.lower() == "one piece" and not info.year:
+            info.year = 1999
+
         logger.info(f"Regex Parsed Title: '{info.title}' Year: {info.year} S: {info.season} E: {info.episode}")
         
         # TMDB Enrichment
@@ -233,9 +238,10 @@ if SOURCE_MOVIES_CHANNEL:
         # Mark as processed immediately
         processed_unique_ids.add(unique_id)
 
-        # Step 6: Optional memory safety
-        if len(processed_unique_ids) > 5000:
+        # Step 6: Memory safety
+        if len(processed_unique_ids) > 10000:
             processed_unique_ids.clear()
+            logger.warning("processed_unique_ids cleared to free memory")
 
         logger.info(f"Directly processing Movie Request: {message.id}")
         await process_media_request(client, message, 'movie')
@@ -281,9 +287,10 @@ if SOURCE_SERIES_CHANNEL:
         logger.info(f"[DEDUP-OK] New file accepted | {trace(message)}")
         processed_unique_ids.add(unique_id)
 
-        # Step 6: Optional memory safety
-        if len(processed_unique_ids) > 5000:
+        # Step 6: Memory safety
+        if len(processed_unique_ids) > 10000:
             processed_unique_ids.clear()
+            logger.warning("processed_unique_ids cleared to free memory")
 
         logger.info(f"Directly processing Series Request: {message.id}")
         await process_media_request(client, message, 'series')

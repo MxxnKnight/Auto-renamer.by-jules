@@ -42,6 +42,16 @@ tmdb = TMDBClient()
 # GLOBAL FILE DEDUPE (Step 1)
 processed_file_ids = set()
 
+# STEP 1: ADD THIS HELPER (GLOBAL)
+def trace(message):
+    file_id = (
+        message.video.file_id if message.video else
+        message.document.file_id if message.document else
+        message.audio.file_id if message.audio else
+        None
+    )
+    return f"chat={message.chat.id} msg={message.id} file_id={file_id}"
+
 def get_file_name(message):
     if message.video:
         return message.video.file_name
@@ -125,6 +135,9 @@ async def process_media_request(client, message, search_type):
         sent = None
         file_id = get_file_id(message)
         
+        # STEP 5: ADD SEND LOGS (BEFORE)
+        logger.info(f"[SEND-START] Sending to target | {trace(message)}")
+
         if message.video:
             sent = await send_with_flood_handling(
                 client.send_video,
@@ -150,6 +163,8 @@ async def process_media_request(client, message, search_type):
             )
             
         if sent:
+            # STEP 5: ADD SEND LOGS (AFTER)
+            logger.info(f"[SEND-DONE] Sent to target | {trace(message)}")
             logger.info(f"Sent to target: {sent.id} (Channel ID: {TARGET_CHANNEL})")
 
             # Double check we didn't send to source
@@ -158,8 +173,12 @@ async def process_media_request(client, message, search_type):
 
             # Delete original message
             try:
+                # STEP 6: ADD DELETE LOGS (BEFORE)
+                logger.info(f"[DELETE-START] Deleting source | {trace(message)}")
                 await asyncio.sleep(0.5)
                 await send_with_flood_handling(message.delete)
+                # STEP 6: ADD DELETE LOGS (AFTER)
+                logger.info(f"[DELETE-DONE] Deleted source | {trace(message)}")
                 logger.info("Original message deleted.")
             except Exception as e:
                 logger.error(f"Failed to delete original message: {e}")
@@ -178,11 +197,11 @@ async def process_media_request(client, message, search_type):
 if SOURCE_MOVIES_CHANNEL:
     @app.on_message(filters.chat(SOURCE_MOVIES_CHANNEL) & (filters.document | filters.video | filters.audio))
     async def handle_movies(client, message):
-        # Step 3: HARD BLOCK TARGET CHANNEL
+        # HARD BLOCK TARGET CHANNEL
         if message.chat.id == TARGET_CHANNEL:
             return
 
-        # Ensure only one handler processes
+        # ENSURE ONLY ONE HANDLER CAN PROCESS
         if message.chat.id != SOURCE_MOVIES_CHANNEL:
             return
 
@@ -192,7 +211,7 @@ if SOURCE_MOVIES_CHANNEL:
         if message.sender_chat and message.sender_chat.id == TARGET_CHANNEL:
             return
 
-        # Step 2: DEDUPE ONLY BY file_id
+        # Deduplication Check
         file_id = get_file_id(message)
 
         if not file_id:
@@ -216,13 +235,21 @@ else:
     logger.warning("SOURCE_MOVIES_CHANNEL not set. Movie monitoring disabled.")
 
 if SOURCE_SERIES_CHANNEL:
-    @app.on_message(filters.chat(SOURCE_SERIES_CHANNEL) & (filters.document | filters.video | filters.audio))
+    # STEP 7: (OPTIONAL) BLOCK EDITED MESSAGES
+    @app.on_message(
+        filters.chat(SOURCE_SERIES_CHANNEL)
+        & (filters.document | filters.video | filters.audio)
+        & ~filters.edited
+    )
     async def handle_series(client, message):
-        # Step 3: HARD BLOCK TARGET CHANNEL
+        # STEP 3: ADD ENTRY LOG (SERIES HANDLER)
+        logger.warning(f"[ENTRY] Series handler triggered | {trace(message)}")
+
+        # HARD BLOCK TARGET CHANNEL
         if message.chat.id == TARGET_CHANNEL:
             return
 
-        # Ensure only one handler processes
+        # ENSURE ONLY ONE HANDLER CAN PROCESS
         if message.chat.id != SOURCE_SERIES_CHANNEL:
             return
 
@@ -232,17 +259,23 @@ if SOURCE_SERIES_CHANNEL:
         if message.sender_chat and message.sender_chat.id == TARGET_CHANNEL:
             return
 
-        # Step 2: DEDUPE ONLY BY file_id
-        file_id = get_file_id(message)
+        # STEP 4: ADD FILE_ID DEDUPE LOG (REPLACE BLOCK)
+        file_id = (
+            message.video.file_id if message.video else
+            message.document.file_id if message.document else
+            message.audio.file_id if message.audio else
+            None
+        )
 
         if not file_id:
+            logger.error(f"[NO-FILE-ID] {trace(message)}")
             return
 
         if file_id in processed_file_ids:
-            # logger.info(f"Skipping duplicate file: {file_id}") # Reduce log noise if needed
+            logger.error(f"[DUPLICATE-SKIP] file_id already seen | {trace(message)}")
             return
 
-        # Mark as processed immediately
+        logger.info(f"[DEDUP-OK] New file accepted | {trace(message)}")
         processed_file_ids.add(file_id)
 
         # Step 6: Optional memory safety
@@ -278,6 +311,8 @@ async def main():
 
     # Start Bot
     logger.info("Starting Bot...")
+    # STEP 2: ADD STARTUP LOG
+    logger.critical("BOT STARTED — WATCHING FOR DUPLICATES")
     await app.start()
     logger.info("Bot started!")
 

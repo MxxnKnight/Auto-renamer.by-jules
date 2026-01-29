@@ -36,7 +36,15 @@ if not BOT_TOKEN:
 
 # Set workers=1 to ensure sequential processing (FIFO) of messages
 # This solves the issue of out-of-order forwarding for series batches.
-app = Client("renamer_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=1)
+# FIX: max_retries=0 prevents Pyrogram from retrying sent messages on timeout, avoiding duplicates.
+app = Client(
+    "renamer_bot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN,
+    workers=1,
+    max_retries=0
+)
 tmdb = TMDBClient()
 
 # GLOBAL DEDUPLICATION CACHES

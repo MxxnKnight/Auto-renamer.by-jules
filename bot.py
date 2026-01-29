@@ -39,7 +39,7 @@ if not BOT_TOKEN:
 app = Client("renamer_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=1)
 tmdb = TMDBClient()
 
-# Global Deduplication Set
+# GLOBAL FILE DEDUPE (Step 1)
 processed_file_ids = set()
 
 def get_file_name(message):
@@ -178,11 +178,11 @@ async def process_media_request(client, message, search_type):
 if SOURCE_MOVIES_CHANNEL:
     @app.on_message(filters.chat(SOURCE_MOVIES_CHANNEL) & (filters.document | filters.video | filters.audio))
     async def handle_movies(client, message):
-        # HARD BLOCK TARGET CHANNEL
+        # Step 3: HARD BLOCK TARGET CHANNEL
         if message.chat.id == TARGET_CHANNEL:
             return
 
-        # ENSURE ONLY ONE HANDLER CAN PROCESS
+        # Ensure only one handler processes
         if message.chat.id != SOURCE_MOVIES_CHANNEL:
             return
 
@@ -192,18 +192,22 @@ if SOURCE_MOVIES_CHANNEL:
         if message.sender_chat and message.sender_chat.id == TARGET_CHANNEL:
             return
 
-        # Deduplication Check
+        # Step 2: DEDUPE ONLY BY file_id
         file_id = get_file_id(message)
-        if file_id in processed_file_ids:
-            logger.info(f"Skipping duplicate file: {file_id}")
+
+        if not file_id:
             return
 
-        if file_id:
-            processed_file_ids.add(file_id)
+        if file_id in processed_file_ids:
+            # logger.info(f"Skipping duplicate file: {file_id}") # Reduce log noise if needed
+            return
 
-            # Optional: Clear cache if too big
-            if len(processed_file_ids) > 10000:
-                processed_file_ids.clear()
+        # Mark as processed immediately
+        processed_file_ids.add(file_id)
+
+        # Step 6: Optional memory safety
+        if len(processed_file_ids) > 5000:
+            processed_file_ids.clear()
 
         logger.info(f"Directly processing Movie Request: {message.id}")
         await process_media_request(client, message, 'movie')
@@ -214,11 +218,11 @@ else:
 if SOURCE_SERIES_CHANNEL:
     @app.on_message(filters.chat(SOURCE_SERIES_CHANNEL) & (filters.document | filters.video | filters.audio))
     async def handle_series(client, message):
-        # HARD BLOCK TARGET CHANNEL
+        # Step 3: HARD BLOCK TARGET CHANNEL
         if message.chat.id == TARGET_CHANNEL:
             return
 
-        # ENSURE ONLY ONE HANDLER CAN PROCESS
+        # Ensure only one handler processes
         if message.chat.id != SOURCE_SERIES_CHANNEL:
             return
 
@@ -228,18 +232,22 @@ if SOURCE_SERIES_CHANNEL:
         if message.sender_chat and message.sender_chat.id == TARGET_CHANNEL:
             return
 
-        # Deduplication Check
+        # Step 2: DEDUPE ONLY BY file_id
         file_id = get_file_id(message)
-        if file_id in processed_file_ids:
-            logger.info(f"Skipping duplicate file: {file_id}")
+
+        if not file_id:
             return
 
-        if file_id:
-            processed_file_ids.add(file_id)
+        if file_id in processed_file_ids:
+            # logger.info(f"Skipping duplicate file: {file_id}") # Reduce log noise if needed
+            return
 
-            # Optional: Clear cache if too big
-            if len(processed_file_ids) > 10000:
-                processed_file_ids.clear()
+        # Mark as processed immediately
+        processed_file_ids.add(file_id)
+
+        # Step 6: Optional memory safety
+        if len(processed_file_ids) > 5000:
+            processed_file_ids.clear()
 
         logger.info(f"Directly processing Series Request: {message.id}")
         await process_media_request(client, message, 'series')

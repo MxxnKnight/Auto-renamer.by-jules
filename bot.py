@@ -129,14 +129,17 @@ async def process_media_request(client, message, search_type):
             file_size = get_file_size(message)
             if file_size:
                 movie_key = f"{file_size}"
+                logger.info(f"Checking Movie Key: {movie_key} | {trace(message)}")
+
                 if movie_key in seen_movie_files:
-                    logger.warning(f"[MOVIE-SKIP] Telegram duplicate movie detected | {trace(message)}")
+                    logger.warning(f"[MOVIE-SKIP] Telegram duplicate movie detected (Size: {file_size}) | {trace(message)}")
                     return
                 seen_movie_files.add(movie_key)
 
                 # Memory Safety
                 if len(seen_movie_files) > 5000:
                     seen_movie_files.clear()
+                    logger.warning("seen_movie_files cleared to free memory")
 
         elif search_type == 'series':
             # STEP 3: SERIES — EPISODE NUMBER ONLY
@@ -144,6 +147,7 @@ async def process_media_request(client, message, search_type):
             episode = info.episode if info.episode is not None else 0 # Safe default
 
             series_key = f"s{season:02d}e{episode:02d}"
+            logger.info(f"Checking Series Key: {series_key} | {trace(message)}")
 
             if series_key in seen_series_episodes:
                 logger.warning(f"[SERIES-SKIP] Duplicate episode detected ({series_key}) | {trace(message)}")
@@ -154,6 +158,7 @@ async def process_media_request(client, message, search_type):
             # Memory Safety
             if len(seen_series_episodes) > 5000:
                 seen_series_episodes.clear()
+                logger.warning("seen_series_episodes cleared to free memory")
 
         logger.info(f"Regex Parsed Title: '{info.title}' Year: {info.year} S: {info.season} E: {info.episode}")
         
@@ -193,7 +198,8 @@ async def process_media_request(client, message, search_type):
         file_id = get_file_id(message)
         
         # STEP 5: ADD SEND LOGS (BEFORE)
-        logger.info(f"[SEND-START] Sending to target | {trace(message)}")
+        unique_id = get_unique_id(message)
+        logger.info(f"[SEND-START] Sending to target | chat={message.chat.id} msg={message.id} unique_id={unique_id}")
 
         if message.video:
             sent = await send_with_flood_handling(
@@ -221,7 +227,7 @@ async def process_media_request(client, message, search_type):
             
         if sent:
             # STEP 5: ADD SEND LOGS (AFTER)
-            logger.info(f"[SEND-DONE] Sent to target | {trace(message)}")
+            logger.info(f"[SEND-DONE] Sent to target | chat={message.chat.id} msg={message.id} unique_id={unique_id}")
             logger.info(f"Sent to target: {sent.id} (Channel ID: {TARGET_CHANNEL})")
 
             # Double check we didn't send to source
@@ -231,11 +237,11 @@ async def process_media_request(client, message, search_type):
             # Delete original message
             try:
                 # STEP 6: ADD DELETE LOGS (BEFORE)
-                logger.info(f"[DELETE-START] Deleting source | {trace(message)}")
+                logger.info(f"[DELETE-START] Deleting source | chat={message.chat.id} msg={message.id} unique_id={unique_id}")
                 await asyncio.sleep(0.5)
                 await send_with_flood_handling(message.delete)
                 # STEP 6: ADD DELETE LOGS (AFTER)
-                logger.info(f"[DELETE-DONE] Deleted source | {trace(message)}")
+                logger.info(f"[DELETE-DONE] Deleted source | chat={message.chat.id} msg={message.id} unique_id={unique_id}")
                 logger.info("Original message deleted.")
             except Exception as e:
                 logger.error(f"Failed to delete original message: {e}")
@@ -254,8 +260,11 @@ async def process_media_request(client, message, search_type):
 if SOURCE_MOVIES_CHANNEL:
     @app.on_message(filters.chat(SOURCE_MOVIES_CHANNEL) & (filters.document | filters.video | filters.audio))
     async def handle_movies(client, message):
+        logger.info(f"Processing in MOVIE Channel {SOURCE_MOVIES_CHANNEL} | {trace(message)}")
+
         # STEP 1: MESSAGE-LEVEL DEDUPE (MANDATORY)
         if message.id in seen_message_ids:
+            logger.warning(f"[MSG-ID-DEDUPE] Blocked duplicate Message ID: {message.id}")
             return
         seen_message_ids.add(message.id)
 
@@ -286,8 +295,11 @@ if SOURCE_SERIES_CHANNEL:
         & (filters.document | filters.video | filters.audio)
     )
     async def handle_series(client, message):
+        logger.info(f"Processing in SERIES Channel {SOURCE_SERIES_CHANNEL} | {trace(message)}")
+
         # STEP 1: MESSAGE-LEVEL DEDUPE (MANDATORY)
         if message.id in seen_message_ids:
+            logger.warning(f"[MSG-ID-DEDUPE] Blocked duplicate Message ID: {message.id}")
             return
         seen_message_ids.add(message.id)
 

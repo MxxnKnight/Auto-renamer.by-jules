@@ -39,13 +39,6 @@ if not BOT_TOKEN:
 app = Client("renamer_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=1)
 tmdb = TMDBClient()
 
-# GLOBAL FILE DEDUPE (Step 2)
-processed_file_ids = set()
-
-# Global Processing Queue for Strict Sequential Processing
-# Initialized in main() to ensure loop binding
-processing_queue = None
-
 def get_file_name(message):
     if message.video:
         return message.video.file_name
@@ -75,35 +68,7 @@ async def send_with_flood_handling(func, *args, **kwargs):
         logger.error(f"Error in send_with_flood_handling: {e}")
         raise e
 
-async def worker():
-    logger.info("Worker started. Waiting for tasks...")
-    while True:
-        try:
-            # Get task from queue
-            client, message, search_type = await processing_queue.get()
-
-            try:
-                logger.info(f"Worker picked up message: {message.id} ({search_type})")
-
-                # Process the request
-                await process_media_request(client, message, search_type)
-
-                # Rate limiting / Delay between files
-                # User requested "no need to rush, you can allow rate limit time delay"
-                logger.info("Worker sleeping for 3 seconds...")
-                await asyncio.sleep(3)
-            finally:
-                processing_queue.task_done()
-
-        except Exception as e:
-            logger.error(f"Worker crashed: {e}", exc_info=True)
-            # Prevent worker from dying completely, just restart loop
-            await asyncio.sleep(5)
-
 async def process_media_request(client, message, search_type):
-    # Step 1: REMOVE old duplicate systems
-    # Removed pending_messages, processed_messages, unique_id checks.
-
     try:
         file_name = get_file_name(message)
         caption = message.caption or ""
@@ -210,53 +175,34 @@ async def process_media_request(client, message, search_type):
 if SOURCE_MOVIES_CHANNEL:
     @app.on_message(filters.chat(SOURCE_MOVIES_CHANNEL) & (filters.document | filters.video | filters.audio))
     async def handle_movies(client, message):
-        # Step 3: HARD BLOCK TARGET CHANNEL
+        # HARD BLOCK TARGET CHANNEL
         if message.chat.id == TARGET_CHANNEL:
             return
 
-        # Step 5: ENSURE ONLY ONE HANDLER CAN PROCESS
+        # ENSURE ONLY ONE HANDLER CAN PROCESS
         if message.chat.id != SOURCE_MOVIES_CHANNEL:
             return
 
-        # Fix: Properly ignore bot’s own messages (Added from previous fix, keeping for safety)
+        # Fix: Properly ignore bot’s own messages
         if message.from_user and message.from_user.is_bot:
             return
         if message.sender_chat and message.sender_chat.id == TARGET_CHANNEL:
             return
 
-        # Step 4: DEDUPE ONLY BY file_id (HANDLER ONLY)
-        file_id = get_file_id(message)
+        logger.info(f"Directly processing Movie Request: {message.id}")
+        await process_media_request(client, message, 'movie')
 
-        if not file_id:
-            return
-
-        if file_id in processed_file_ids:
-            logger.info(f"Duplicate file skipped: {file_id}")
-            return
-
-        # Step 8: OPTIONAL MEMORY SAFETY
-        if len(processed_file_ids) > 10000:
-            processed_file_ids.clear()
-
-        processed_file_ids.add(file_id)
-
-        # Step 6: QUEUE ONLY ONCE
-        if processing_queue:
-            logger.info(f"Queued Movie Request: {message.id}")
-            await processing_queue.put((client, message, 'movie'))
-        else:
-            logger.error("Processing Queue not initialized!")
 else:
     logger.warning("SOURCE_MOVIES_CHANNEL not set. Movie monitoring disabled.")
 
 if SOURCE_SERIES_CHANNEL:
     @app.on_message(filters.chat(SOURCE_SERIES_CHANNEL) & (filters.document | filters.video | filters.audio))
     async def handle_series(client, message):
-        # Step 3: HARD BLOCK TARGET CHANNEL
+        # HARD BLOCK TARGET CHANNEL
         if message.chat.id == TARGET_CHANNEL:
             return
 
-        # Step 5: ENSURE ONLY ONE HANDLER CAN PROCESS
+        # ENSURE ONLY ONE HANDLER CAN PROCESS
         if message.chat.id != SOURCE_SERIES_CHANNEL:
             return
 
@@ -266,37 +212,13 @@ if SOURCE_SERIES_CHANNEL:
         if message.sender_chat and message.sender_chat.id == TARGET_CHANNEL:
             return
 
-        # Step 4: DEDUPE ONLY BY file_id (HANDLER ONLY)
-        file_id = get_file_id(message)
+        logger.info(f"Directly processing Series Request: {message.id}")
+        await process_media_request(client, message, 'series')
 
-        if not file_id:
-            return
-
-        if file_id in processed_file_ids:
-            logger.info(f"Duplicate file skipped: {file_id}")
-            return
-
-        # Step 8: OPTIONAL MEMORY SAFETY
-        if len(processed_file_ids) > 10000:
-            processed_file_ids.clear()
-
-        processed_file_ids.add(file_id)
-
-        # Step 6: QUEUE ONLY ONCE
-        if processing_queue:
-            logger.info(f"Queued Series Request: {message.id}")
-            await processing_queue.put((client, message, 'series'))
-        else:
-            logger.error("Processing Queue not initialized!")
 else:
     logger.warning("SOURCE_SERIES_CHANNEL not set. Series monitoring disabled.")
 
 async def main():
-    global processing_queue
-    # Step 7: STRICT ORDER GUARANTEE (Queue + Worker)
-    # Initialize Queue with the running event loop
-    processing_queue = asyncio.Queue()
-
     # Start Web Server
     logger.info("Starting Web Server...")
     web_app = await start_web_server()
@@ -321,9 +243,6 @@ async def main():
     logger.info("Starting Bot...")
     await app.start()
     logger.info("Bot started!")
-
-    # Start Worker Task
-    asyncio.create_task(worker())
 
     # Idle to keep the script running
     await idle()

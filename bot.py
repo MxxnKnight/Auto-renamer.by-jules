@@ -40,8 +40,11 @@ app = Client("renamer_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKE
 tmdb = TMDBClient()
 
 # Message ID Cache for Deduplication
-# Stores the last 1000 processed message IDs
-processed_messages = deque(maxlen=1000)
+# Stores the last 5000 processed message IDs
+processed_messages = deque(maxlen=5000)
+
+# Processed Files Cache (Optional Fix)
+processed_files = set()
 
 # Pending Messages Set (for fast O(1) lookups before queueing)
 pending_messages = set()
@@ -105,7 +108,7 @@ async def worker():
             await asyncio.sleep(5)
 
 async def process_media_request(client, message, search_type):
-    unique_id = (message.chat.id, message.id)
+    unique_id = f"{message.chat.id}:{message.id}:{message.date}"
 
     # Remove from pending, add to processed
     if unique_id in pending_messages:
@@ -118,6 +121,13 @@ async def process_media_request(client, message, search_type):
 
     # Add to cache immediately
     processed_messages.append(unique_id)
+
+    # Optional Fix: file_id deduplication
+    file_uid = get_file_id(message)
+    if file_uid in processed_files:
+        logger.info(f"File {file_uid} already processed. Skipping.")
+        return
+    processed_files.add(file_uid)
 
     try:
         file_name = get_file_name(message)
@@ -205,6 +215,7 @@ async def process_media_request(client, message, search_type):
 
             # Delete original message
             try:
+                await asyncio.sleep(0.5)
                 await send_with_flood_handling(message.delete)
                 logger.info("Original message deleted.")
             except Exception as e:
@@ -224,11 +235,17 @@ async def process_media_request(client, message, search_type):
 if SOURCE_MOVIES_CHANNEL:
     @app.on_message(filters.chat(SOURCE_MOVIES_CHANNEL) & (filters.document | filters.video | filters.audio))
     async def handle_movies(client, message):
-        # Ignore own messages
-        if message.from_user and message.from_user.is_self:
+        # Fix 3: Never process TARGET channel (hard block)
+        if message.chat.id == TARGET_CHANNEL:
             return
 
-        unique_id = (message.chat.id, message.id)
+        # Fix 2: Properly ignore bot’s own messages
+        if message.from_user and message.from_user.is_bot:
+            return
+        if message.sender_chat and message.sender_chat.id == TARGET_CHANNEL:
+            return
+
+        unique_id = f"{message.chat.id}:{message.id}:{message.date}"
         if unique_id in pending_messages or unique_id in processed_messages:
             logger.info(f"Ignoring duplicate/pending message: {message.id}")
             return
@@ -245,11 +262,17 @@ else:
 if SOURCE_SERIES_CHANNEL:
     @app.on_message(filters.chat(SOURCE_SERIES_CHANNEL) & (filters.document | filters.video | filters.audio))
     async def handle_series(client, message):
-        # Ignore own messages
-        if message.from_user and message.from_user.is_self:
+        # Fix 3: Never process TARGET channel (hard block)
+        if message.chat.id == TARGET_CHANNEL:
             return
 
-        unique_id = (message.chat.id, message.id)
+        # Fix 2: Properly ignore bot’s own messages
+        if message.from_user and message.from_user.is_bot:
+            return
+        if message.sender_chat and message.sender_chat.id == TARGET_CHANNEL:
+            return
+
+        unique_id = f"{message.chat.id}:{message.id}:{message.date}"
         if unique_id in pending_messages or unique_id in processed_messages:
             logger.info(f"Ignoring duplicate/pending message: {message.id}")
             return

@@ -44,6 +44,10 @@ seen_message_ids = set()
 seen_movie_files = set()
 seen_series_episodes = set()
 
+# GLOBAL STATS
+TOTAL_RECEIVED = 0
+TOTAL_SENT = 0
+
 # STEP 1: ADD THIS HELPER (GLOBAL)
 def trace(message):
     unique_id = (
@@ -102,6 +106,7 @@ async def send_with_flood_handling(func, *args, **kwargs):
         raise e
 
 async def process_media_request(client, message, search_type):
+    global TOTAL_SENT
     try:
         file_name = get_file_name(message)
         caption = message.caption or ""
@@ -132,7 +137,7 @@ async def process_media_request(client, message, search_type):
                 logger.info(f"Checking Movie Key: {movie_key} | {trace(message)}")
 
                 if movie_key in seen_movie_files:
-                    logger.warning(f"[MOVIE-SKIP] Telegram duplicate movie detected (Size: {file_size}) | {trace(message)}")
+                    logger.warning(f"[MOVIE-SKIP] Blocked from sending (Duplicate Size: {file_size}) | {trace(message)}")
                     return
                 seen_movie_files.add(movie_key)
 
@@ -142,15 +147,17 @@ async def process_media_request(client, message, search_type):
                     logger.warning("seen_movie_files cleared to free memory")
 
         elif search_type == 'series':
-            # STEP 3: SERIES — EPISODE NUMBER ONLY
+            # STEP 3: SERIES — EPISODE + SIZE DEDUPE (Allow Different Qualities)
+            file_size = get_file_size(message)
             season = info.season or 1
             episode = info.episode if info.episode is not None else 0 # Safe default
 
-            series_key = f"s{season:02d}e{episode:02d}"
+            # Key now includes file size to allow different resolutions/versions of same episode
+            series_key = f"s{season:02d}e{episode:02d}:{file_size}"
             logger.info(f"Checking Series Key: {series_key} | {trace(message)}")
 
             if series_key in seen_series_episodes:
-                logger.warning(f"[SERIES-SKIP] Duplicate episode detected ({series_key}) | {trace(message)}")
+                logger.warning(f"[SERIES-SKIP] Blocked from sending (Duplicate Episode+Size: {series_key}) | {trace(message)}")
                 return
 
             seen_series_episodes.add(series_key)
@@ -226,9 +233,11 @@ async def process_media_request(client, message, search_type):
             )
             
         if sent:
+            TOTAL_SENT += 1
             # STEP 5: ADD SEND LOGS (AFTER)
             logger.info(f"[SEND-DONE] Sent to target | chat={message.chat.id} msg={message.id} unique_id={unique_id}")
             logger.info(f"Sent to target: {sent.id} (Channel ID: {TARGET_CHANNEL})")
+            logger.info(f"STATS: Total Received: {TOTAL_RECEIVED} | Total Sent: {TOTAL_SENT}")
 
             # Double check we didn't send to source
             if sent.chat.id == message.chat.id:
@@ -260,6 +269,8 @@ async def process_media_request(client, message, search_type):
 if SOURCE_MOVIES_CHANNEL:
     @app.on_message(filters.chat(SOURCE_MOVIES_CHANNEL) & (filters.document | filters.video | filters.audio))
     async def handle_movies(client, message):
+        global TOTAL_RECEIVED
+        TOTAL_RECEIVED += 1
         logger.info(f"Processing in MOVIE Channel {SOURCE_MOVIES_CHANNEL} | {trace(message)}")
 
         # STEP 1: MESSAGE-LEVEL DEDUPE (MANDATORY)
@@ -295,6 +306,8 @@ if SOURCE_SERIES_CHANNEL:
         & (filters.document | filters.video | filters.audio)
     )
     async def handle_series(client, message):
+        global TOTAL_RECEIVED
+        TOTAL_RECEIVED += 1
         logger.info(f"Processing in SERIES Channel {SOURCE_SERIES_CHANNEL} | {trace(message)}")
 
         # STEP 1: MESSAGE-LEVEL DEDUPE (MANDATORY)

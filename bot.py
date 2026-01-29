@@ -39,18 +39,18 @@ if not BOT_TOKEN:
 app = Client("renamer_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=1)
 tmdb = TMDBClient()
 
-# GLOBAL FILE DEDUPE (Step 1)
-processed_file_ids = set()
+# GLOBAL FILE DEDUPE (Unique IDs)
+processed_unique_ids = set()
 
 # STEP 1: ADD THIS HELPER (GLOBAL)
 def trace(message):
-    file_id = (
-        message.video.file_id if message.video else
-        message.document.file_id if message.document else
-        message.audio.file_id if message.audio else
+    unique_id = (
+        message.video.file_unique_id if message.video else
+        message.document.file_unique_id if message.document else
+        message.audio.file_unique_id if message.audio else
         None
     )
-    return f"chat={message.chat.id} msg={message.id} file_id={file_id}"
+    return f"chat={message.chat.id} msg={message.id} unique_id={unique_id}"
 
 def get_file_name(message):
     if message.video:
@@ -68,6 +68,15 @@ def get_file_id(message):
         return message.document.file_id
     elif message.audio:
         return message.audio.file_id
+    return None
+
+def get_unique_id(message):
+    if message.video:
+        return message.video.file_unique_id
+    elif message.document:
+        return message.document.file_unique_id
+    elif message.audio:
+        return message.audio.file_unique_id
     return None
 
 async def send_with_flood_handling(func, *args, **kwargs):
@@ -211,22 +220,22 @@ if SOURCE_MOVIES_CHANNEL:
         if message.sender_chat and message.sender_chat.id == TARGET_CHANNEL:
             return
 
-        # Deduplication Check
-        file_id = get_file_id(message)
+        # Deduplication Check (UNIQUE ID)
+        unique_id = get_unique_id(message)
 
-        if not file_id:
+        if not unique_id:
             return
 
-        if file_id in processed_file_ids:
-            # logger.info(f"Skipping duplicate file: {file_id}") # Reduce log noise if needed
+        if unique_id in processed_unique_ids:
+            logger.info(f"[DUPLICATE-SKIP] unique_id already seen | {trace(message)}")
             return
 
         # Mark as processed immediately
-        processed_file_ids.add(file_id)
+        processed_unique_ids.add(unique_id)
 
         # Step 6: Optional memory safety
-        if len(processed_file_ids) > 5000:
-            processed_file_ids.clear()
+        if len(processed_unique_ids) > 5000:
+            processed_unique_ids.clear()
 
         logger.info(f"Directly processing Movie Request: {message.id}")
         await process_media_request(client, message, 'movie')
@@ -258,28 +267,23 @@ if SOURCE_SERIES_CHANNEL:
         if message.sender_chat and message.sender_chat.id == TARGET_CHANNEL:
             return
 
-        # STEP 4: ADD FILE_ID DEDUPE LOG (REPLACE BLOCK)
-        file_id = (
-            message.video.file_id if message.video else
-            message.document.file_id if message.document else
-            message.audio.file_id if message.audio else
-            None
-        )
+        # Deduplication Check (UNIQUE ID)
+        unique_id = get_unique_id(message)
 
-        if not file_id:
-            logger.error(f"[NO-FILE-ID] {trace(message)}")
+        if not unique_id:
+            logger.error(f"[NO-UNIQUE-ID] {trace(message)}")
             return
 
-        if file_id in processed_file_ids:
-            logger.error(f"[DUPLICATE-SKIP] file_id already seen | {trace(message)}")
+        if unique_id in processed_unique_ids:
+            logger.error(f"[DUPLICATE-SKIP] unique_id already seen | {trace(message)}")
             return
 
         logger.info(f"[DEDUP-OK] New file accepted | {trace(message)}")
-        processed_file_ids.add(file_id)
+        processed_unique_ids.add(unique_id)
 
         # Step 6: Optional memory safety
-        if len(processed_file_ids) > 5000:
-            processed_file_ids.clear()
+        if len(processed_unique_ids) > 5000:
+            processed_unique_ids.clear()
 
         logger.info(f"Directly processing Series Request: {message.id}")
         await process_media_request(client, message, 'series')

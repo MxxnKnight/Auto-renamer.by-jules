@@ -41,7 +41,8 @@ tmdb = TMDBClient()
 
 # GLOBAL DEDUPLICATION CACHES
 seen_message_ids = set()
-seen_content_keys = set()
+seen_movie_files = set()
+seen_series_episodes = set()
 
 # STEP 1: ADD THIS HELPER (GLOBAL)
 def trace(message):
@@ -80,6 +81,15 @@ def get_unique_id(message):
         return message.audio.file_unique_id
     return None
 
+def get_file_size(message):
+    if message.video:
+        return message.video.file_size
+    elif message.document:
+        return message.document.file_size
+    elif message.audio:
+        return message.audio.file_size
+    return None
+
 async def send_with_flood_handling(func, *args, **kwargs):
     try:
         return await func(*args, **kwargs)
@@ -113,24 +123,37 @@ async def process_media_request(client, message, search_type):
         if info.title and info.title.lower() == "one piece" and not info.year:
             info.year = 1999
 
-        # CONTENT KEY DEDUPLICATION
-        content_key = None
+        # SPLIT DEDUPLICATION LOGIC
         if search_type == 'movie':
-            content_key = f"movie:{str(info.title).lower()}:{info.year}"
-        elif search_type == 'series':
-            content_key = f"series:{str(info.title).lower()}:s{info.season or 1}:e{info.episode}"
+            # STEP 2: MOVIES — FILE SIZE DEDUPE ONLY
+            file_size = get_file_size(message)
+            if file_size:
+                movie_key = f"{file_size}"
+                if movie_key in seen_movie_files:
+                    logger.warning(f"[MOVIE-SKIP] Telegram duplicate movie detected | {trace(message)}")
+                    return
+                seen_movie_files.add(movie_key)
 
-        if content_key:
-            if content_key in seen_content_keys:
-                logger.warning(f"[CONTENT-SKIP] Already sent {content_key} | {trace(message)}")
+                # Memory Safety
+                if len(seen_movie_files) > 5000:
+                    seen_movie_files.clear()
+
+        elif search_type == 'series':
+            # STEP 3: SERIES — EPISODE NUMBER ONLY
+            season = info.season or 1
+            episode = info.episode if info.episode is not None else 0 # Safe default
+
+            series_key = f"s{season:02d}e{episode:02d}"
+
+            if series_key in seen_series_episodes:
+                logger.warning(f"[SERIES-SKIP] Duplicate episode detected ({series_key}) | {trace(message)}")
                 return
 
-            seen_content_keys.add(content_key)
+            seen_series_episodes.add(series_key)
 
-            # Memory Safety for Content Keys
-            if len(seen_content_keys) > 5000:
-                seen_content_keys.clear()
-                logger.warning("seen_content_keys cleared to free memory")
+            # Memory Safety
+            if len(seen_series_episodes) > 5000:
+                seen_series_episodes.clear()
 
         logger.info(f"Regex Parsed Title: '{info.title}' Year: {info.year} S: {info.season} E: {info.episode}")
         
@@ -231,7 +254,7 @@ async def process_media_request(client, message, search_type):
 if SOURCE_MOVIES_CHANNEL:
     @app.on_message(filters.chat(SOURCE_MOVIES_CHANNEL) & (filters.document | filters.video | filters.audio))
     async def handle_movies(client, message):
-        # MESSAGE ID DEDUPLICATION (Short-term)
+        # STEP 1: MESSAGE-LEVEL DEDUPE (MANDATORY)
         if message.id in seen_message_ids:
             return
         seen_message_ids.add(message.id)
@@ -263,7 +286,7 @@ if SOURCE_SERIES_CHANNEL:
         & (filters.document | filters.video | filters.audio)
     )
     async def handle_series(client, message):
-        # MESSAGE ID DEDUPLICATION (Short-term)
+        # STEP 1: MESSAGE-LEVEL DEDUPE (MANDATORY)
         if message.id in seen_message_ids:
             return
         seen_message_ids.add(message.id)

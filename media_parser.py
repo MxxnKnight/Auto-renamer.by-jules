@@ -62,7 +62,7 @@ def clean_title(title):
 
     # 5. Handle "Prefix - Title" pattern
     if ' - ' in title:
-        segments = title.split(' - ')
+        segments = [s.strip() for s in title.split(' - ') if s.strip()]
         if segments:
             title = segments[-1]
 
@@ -312,5 +312,9 @@ def parse_media_info(filename, caption=None, search_type=None):
     if search_type == 'movie':
         season = None
         episode = None
+
+    # Special handling for "One Piece"
+    if clean_t and clean_t.lower() == "one piece" and year is None:
+        year = 1999
 
     return MediaInfo(clean_t, year, resolution, season, episode, source, audio, codec)

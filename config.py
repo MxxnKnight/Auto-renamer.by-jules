@@ -22,6 +22,17 @@ SOURCE_SERIES_CHANNEL = parse_channel(os.getenv("SOURCE_SERIES_CHANNEL"))
 TARGET_CHANNEL = parse_channel(os.getenv("TARGET_CHANNEL"))
 LOG_CHANNEL = parse_channel(os.getenv("LOG_CHANNEL")) # For error notifications
 
+# Admin IDs
+def parse_admin_ids(val):
+    if not val:
+        return []
+    try:
+        return [int(x.strip()) for x in val.split(",") if x.strip()]
+    except ValueError:
+        return []
+
+ADMIN_IDS = parse_admin_ids(os.getenv("ADMIN_IDS", ""))
+
 # Optional: Custom removal list
 SPAM_KEYWORDS = [
     "MoviesFlix", "MoviesVerse", "YTS", "YIFY", 

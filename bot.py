@@ -10,7 +10,7 @@ from collections import deque
 # Monkeypatch Pyrogram to support 64-bit Channel IDs
 utils.MIN_CHANNEL_ID = -1009999999999
 
-from config import API_ID, API_HASH, BOT_TOKEN, SOURCE_MOVIES_CHANNEL, SOURCE_SERIES_CHANNEL, TARGET_CHANNEL, LOG_CHANNEL
+from config import API_ID, API_HASH, BOT_TOKEN, SOURCE_MOVIES_CHANNEL, SOURCE_SERIES_CHANNEL, TARGET_CHANNEL, LOG_CHANNEL, ADMIN_IDS
 from media_parser import parse_media_info
 from web_server import start_web_server
 from tmdb_client import TMDBClient
@@ -46,6 +46,10 @@ processed_messages = deque(maxlen=1000)
 # Pending Messages Set (for fast O(1) lookups before queueing)
 pending_messages = set()
 
+# Deduplication Sets
+seen_series_episodes = set()
+seen_movie_files = set()
+
 # Global Processing Queue for Strict Sequential Processing
 # Initialized in main() to ensure loop binding
 processing_queue = None
@@ -58,6 +62,15 @@ def get_file_name(message):
     elif message.audio:
         return message.audio.file_name
     return None
+
+def get_file_size(message):
+    if message.video:
+        return message.video.file_size
+    elif message.document:
+        return message.document.file_size
+    elif message.audio:
+        return message.audio.file_size
+    return 0
 
 def get_file_id(message):
     if message.video:
@@ -136,6 +149,33 @@ async def process_media_request(client, message, search_type):
         # search_type argument ensures 'movie' files get Season/Episode stripped
         info = parse_media_info(file_name, caption, search_type=search_type)
         logger.info(f"Regex Parsed Title: '{info.title}' Year: {info.year} S: {info.season} E: {info.episode}")
+
+        # --- Content Deduplication Logic ---
+        if search_type == 'series':
+            season = info.season or 1
+            # Quality-Aware Series Deduplication Key
+            series_key = (
+                f"{str(info.title).lower().strip()}:"
+                f"s{season:02d}:"
+                f"e{int(info.episode or 0):02d}:"
+                f"{info.resolution}"
+            )
+
+            if series_key in seen_series_episodes:
+                logger.warning(f"[SERIES-SKIP] Duplicate episode+quality {series_key}")
+                return
+
+            seen_series_episodes.add(series_key)
+
+        elif search_type == 'movie':
+            # Movie Deduplication based on file size
+            file_size = get_file_size(message)
+            if file_size in seen_movie_files:
+                logger.warning(f"[MOVIE-SKIP] Duplicate file size {file_size}")
+                return
+
+            seen_movie_files.add(file_size)
+        # -----------------------------------
         
         # TMDB Enrichment
         if info.title and len(str(info.title)) > 2:
@@ -219,6 +259,17 @@ async def process_media_request(client, message, search_type):
                 await send_with_flood_handling(client.send_message, LOG_CHANNEL, f"Error processing message: {str(e)}")
             except Exception as log_error:
                 logger.error(f"Failed to send error to LOG_CHANNEL: {log_error}")
+
+@app.on_message(filters.command("clearcache") & filters.user(ADMIN_IDS))
+async def clear_cache(client, message):
+    seen_series_episodes.clear()
+    seen_movie_files.clear()
+    processed_messages.clear()
+
+    await message.reply_text(
+        "✅ Cache cleared.\n"
+        "You can resend episodes / movies now."
+    )
 
 # Register Handlers conditionally
 if SOURCE_MOVIES_CHANNEL:

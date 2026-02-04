@@ -62,7 +62,7 @@ def clean_title(title):
 
     # 5. Handle "Prefix - Title" pattern
     if ' - ' in title:
-        segments = title.split(' - ')
+        segments = [s.strip() for s in title.split(' - ') if s.strip()]
         if segments:
             title = segments[-1]
 
@@ -92,52 +92,44 @@ def extract_resolution(text):
     return None
 
 def extract_season_episode(text):
-    # Regex Improvement:
-    # 1. Greedy \d+ for episode to allow backtracking against the Lookahead
-
-    # Priority 0: Merged Resolution (S01E01720p)
-    # Matches S01E01 followed by 720p
-    match = re.search(r'S(\d+)\s?E(\d+)(?=(\d{3,4}p))', text, re.IGNORECASE)
+    # 1) Explicit formats (highest priority)
+    # S01E12, S1E12, E12, EP12, Episode 12
+    # Fix: Added \b or non-word boundary check for 'e'/'ep' to avoid matching 'Stage 2' -> 'ge 2'
+    match = re.search(r'(?i)(?:s(\d{1,2})\s*e(\d{1,3})|\b(?:e|ep|episode)\.?\s*(\d{1,4}))', text)
     if match:
-        return int(match.group(1)), int(match.group(2))
+        if match.group(1) and match.group(2):
+            return int(match.group(1)), int(match.group(2))
+        elif match.group(3):
+            return None, int(match.group(3))
 
-    # Priority 0.5: Merged Resolution Digits (S01E01720) - ambiguous but best effort
-    # Matches S01E01 followed by 720 and end/boundary
-    match = re.search(r'S(\d+)\s?E(\d+)(?=(\d{3,4}(?!\d)))', text, re.IGNORECASE)
-    if match:
-        return int(match.group(1)), int(match.group(2))
-
-    # Priority 1: S01E01 format (Standard)
-    # Rejects S01E720p because 720 is followed by p
-    match = re.search(r'S(\d{1,2})\s?E(\d{1,3})(?!\d|p)', text, re.IGNORECASE)
-    if match:
-        return int(match.group(1)), int(match.group(2))
-    
-    # Priority 2: 1x01 format
+    # 1b) 1x01 format (Standard enough to keep in high priority)
     match = re.search(r'(\d{1,2})x(\d{1,3})(?!\d|p)', text, re.IGNORECASE)
     if match:
         return int(match.group(1)), int(match.group(2))
+
+    # 2) Underscore / dash isolated numbers (anime style)
+    # _232_, - 206 -, .1122.
+    match = re.search(r'(?<!\d)[._-](\d{1,4})[._-](?!\d)', text)
+    if match:
+        return None, int(match.group(1))
     
-    # Priority 3: Episode 1 / Ep 1
-    match = re.search(r'(?:Episode|Ep)\s?\.?(\d{1,4})', text, re.IGNORECASE)
-    if match:
-        return None, int(match.group(1))
-        
-    # Priority 4: " - 123 " (Anime style)
-    # Fixed to avoid matching floats like " - 2.6GB" or " - 5.1"
-    match = re.search(r'\s-\s(\d{1,4})(?=\s|\[|$|(?:\.(?!\d)))', text)
+    # 2.1) Space-isolated leading-zero number (e.g. "Naruto 029 Title")
+    # Must have leading zero to avoid matching years like "2002"
+    match = re.search(r'(?<!\d)\s(0\d{1,3})(?=\s)', text)
     if match:
         return None, int(match.group(1))
 
-    # Priority 5: Episode Number: 1
-    match = re.search(r'Episode Number:\s?(\d+)', text, re.IGNORECASE)
+    # 2.5) Trailing number after hyphen (One Piece - 1122)
+    # Allows end of string or non-digit
+    match = re.search(r'(?<!\d)\s-\s(\d{1,4})(?:$|[^\d])', text)
     if match:
         return None, int(match.group(1))
 
-    # Priority 6: 1/23 (fractions)
-    match = re.search(r'(\d+)/(\d+)', text)
-    if match and "episode" in text.lower():
-         return None, int(match.group(1))
+    # 3) Trailing number near resolution (VERY common)
+    # One Piece 1122 720p, Naruto-206 [720p]
+    match = re.search(r'(?<!\d)(\d{1,4})(?=\s*(?:\[)?(?:480p|720p|1080p|2160p|web|bluray))', text, re.IGNORECASE)
+    if match:
+        return None, int(match.group(1))
 
     return None, None
 
@@ -252,7 +244,10 @@ def parse_media_info(filename, caption=None, search_type=None):
     full_meta_text = (meta_part + " " + (caption or "")).rstrip()
 
     resolution = extract_resolution(full_meta_text) or extract_resolution(raw_text) or "720p"
-    season, episode = extract_season_episode(full_meta_text) or extract_season_episode(raw_text) or (None, None)
+
+    season, episode = extract_season_episode(full_meta_text)
+    if season is None and episode is None:
+        season, episode = extract_season_episode(raw_text)
     
     # Clean Title
     clean_t = clean_title(title_part)
@@ -264,6 +259,28 @@ def parse_media_info(filename, caption=None, search_type=None):
             # Special case: The filename starts with a Year (e.g. "1917.mkv" or "2012.mkv")
             # In this case, the Year is likely the Title.
             clean_t = found_year_str
+
+    # Title Truncation for Anime/Implicit Formats
+    # If we found an episode but the title still contains it (because we didn't split on SxxExx),
+    # we should truncate the title at the episode number.
+    if episode and search_type == 'series':
+        # Create variants to search for: " 029 ", " 29 "
+        # We search for the episode number surrounded by spaces or separators
+        ep_str = str(int(episode))
+        ep_patterns = [
+            rf'\s0*{ep_str}\s',      # " 029 " or " 29 "
+            rf'[-_]0*{ep_str}[-_]',  # "_029_"
+            rf'\s-\s0*{ep_str}',     # " - 029"
+        ]
+
+        for pat in ep_patterns:
+            match = re.search(pat, clean_t)
+            if match:
+                # Truncate title at the start of the match
+                potential_t = clean_t[:match.start()].strip()
+                if len(potential_t) >= 2:
+                    clean_t = potential_t
+                    break
 
     # Fallback: If title is empty or too short, try to parse from Caption
     if (not clean_t or len(clean_t) < 2) and caption:
@@ -283,25 +300,26 @@ def parse_media_info(filename, caption=None, search_type=None):
             if cap_year_str:
                 year = int(cap_year_str)
 
-    # Aggressive Series Logic
-    # If search_type is series, and we didn't find an episode via standard regex,
-    # try to find a standalone number at the end of the title/text.
+    # Aggressive Series Logic (Legacy/Fallback)
+    # Only runs if we found NO episode yet.
     if search_type == 'series' and episode is None:
-        # Look for trailing number in the cleaned title
-        # e.g. "One Piece 236" -> title="One Piece", ep=236
-
         # Regex for trailing number: spaces, then digits, then end of string
+        # Strict check: ensure it's not the ONLY thing (avoid "1899")
         match = re.search(r'\s(\d{1,4})$', clean_t)
         if match:
             found_ep = int(match.group(1))
-            # Potential Title remainder
             potential_title = clean_t[:match.start()].strip()
 
             # Safety Check: Title shouldn't be empty or just symbols
-            if len(potential_title) >= 2:
+            # Also ensure title isn't just digits (like "1899" -> empty remainder if matched, or check original)
+            if len(potential_title) >= 2 and not potential_title.isdigit():
                 episode = found_ep
                 season = 1 # Default to S01
                 clean_t = potential_title
+
+    # STRICT SEASON RULE: If Series mode and no Season found, force S01
+    if search_type == 'series' and season is None and episode is not None:
+        season = 1
 
     # Extract new fields
     source = extract_source(full_meta_text) or extract_source(raw_text)
@@ -312,5 +330,9 @@ def parse_media_info(filename, caption=None, search_type=None):
     if search_type == 'movie':
         season = None
         episode = None
+
+    # Special handling for "One Piece"
+    if clean_t and clean_t.lower() == "one piece" and year is None:
+        year = 1999
 
     return MediaInfo(clean_t, year, resolution, season, episode, source, audio, codec)

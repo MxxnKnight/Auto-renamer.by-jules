@@ -1,4 +1,12 @@
+import os
 import json
+import logging
+from aiohttp import web
+
+logger = logging.getLogger(__name__)
+
+# Temporary storage for file mappings
+file_map = {}
 
 # Egress tracking file
 EGRESS_FILE = "egress.json"
@@ -17,7 +25,6 @@ def update_egress(bytes_sent):
         json.dump({"used": current + bytes_sent}, f)
 
 async def handle_home(request):
-    # (Home content remains same)
     html_content = """
     <!DOCTYPE html>
     <html lang="en">
@@ -52,6 +59,7 @@ async def stream_player_handler(request):
     data = file_map[short_id]
     file_name = data["file_name"]
     stream_url = f"/dl/{short_id}"
+    is_mkv = file_name.lower().endswith('.mkv')
 
     html_content = f"""
     <!DOCTYPE html>
@@ -62,26 +70,38 @@ async def stream_player_handler(request):
         <title>Streaming: {file_name}</title>
         <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
         <style>
-            body {{ background: #000; margin: 0; display: flex; flex-direction: column; height: 100vh; font-family: sans-serif; color: #fff; }}
-            .header {{ padding: 15px; background: rgba(0,0,0,0.8); text-align: center; border-bottom: 1px solid #333; }}
-            .player-container {{ flex-grow: 1; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; }}
-            video {{ max-width: 100%; max-height: 100%; }}
-            .footer {{ padding: 15px; text-align: center; background: #111; }}
-            .btn {{ padding: 10px 20px; background: #007bff; color: #fff; text-decoration: none; border-radius: 5px; font-weight: bold; }}
+            body {{ background: #000; margin: 0; padding: 0; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; flex-direction: column; height: 100vh; }}
+            .header {{ padding: 15px; background: #111; text-align: center; font-size: 14px; border-bottom: 1px solid #222; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }}
+            .main-content {{ flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; }}
+            .plyr-container {{ width: 100%; max-width: 1000px; padding: 10px; box-sizing: border-box; }}
+            .notice {{ margin-top: 15px; color: #ffa500; font-size: 13px; text-align: center; padding: 0 20px; }}
+            .footer {{ padding: 20px; background: #000; text-align: center; }}
+            .btn {{ display: inline-block; padding: 12px 24px; background: #007bff; color: #fff; text-decoration: none; border-radius: 8px; font-weight: bold; transition: background 0.2s; }}
+            .btn:hover {{ background: #0056b3; }}
+            /* Fix Plyr scaling issues */
+            .plyr {{ border-radius: 8px; overflow: hidden; }}
         </style>
     </head>
     <body>
-        <div class="header">🍿 Now Streaming: {file_name}</div>
-        <div class="player-container">
-            <video id="player" playsinline controls>
-                <source src="{stream_url}" type="video/mp4" />
-            </video>
+        <div class="header">🍿 {file_name}</div>
+        <div class="main-content">
+            <div class="plyr-container">
+                <video id="player" playsinline controls>
+                    <source src="{stream_url}" type="video/mp4" />
+                </video>
+            </div>
+            {"<div class='notice'>⚠️ <b>Note:</b> MKV files may not play in some browsers. If it's stuck, please use the button below to open in <b>VLC</b> or <b>MX Player</b>.</div>" if is_mkv else ""}
         </div>
         <div class="footer">
-            <a href="{stream_url}" class="btn">⬇️ Download File</a>
+            <a href="{stream_url}" class="btn">📥 Download / Stream in External Player</a>
         </div>
         <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
-        <script>const player = new Plyr('#player');</script>
+        <script>
+            const player = new Plyr('#player', {{
+                controls: ['play-large', 'play', 'progress', 'current-time', 'mute', 'volume', 'captions', 'settings', 'pip', 'airplay', 'fullscreen'],
+                ratio: '16:9'
+            }});
+        </script>
     </body>
     </html>
     """
@@ -128,7 +148,7 @@ async def raw_stream_handler(request):
     try:
         async for chunk in app.stream_media(file_id, offset=start, limit=content_length):
             await response.write(chunk)
-            update_egress(len(chunk)) # TRACK BANDWIDTH
+            update_egress(len(chunk))
     except Exception as e:
         logger.error(f"Stream error: {e}")
     finally:
@@ -137,9 +157,9 @@ async def raw_stream_handler(request):
     return response
 
 async def start_web_server(client):
-    app = web.Application()
-    app['bot_client'] = client
-    app.router.add_get('/', handle_home)
-    app.router.add_get('/view/{short_id}', stream_player_handler)
-    app.router.add_get('/dl/{short_id}', raw_stream_handler)
-    return app
+    web_app = web.Application()
+    web_app['bot_client'] = client
+    web_app.router.add_get('/', handle_home)
+    web_app.router.add_get('/view/{short_id}', stream_player_handler)
+    web_app.router.add_get('/dl/{short_id}', raw_stream_handler)
+    return web_app

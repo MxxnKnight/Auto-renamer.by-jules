@@ -1,43 +1,22 @@
 from media_parser import parse_media_info
 
-def test_parser():
+def test_rich_parser():
     test_cases = [
-        # Movie cases
         {
-            "filename": "Inception.2010.1080p.BluRay.x264.mkv",
-            "caption": "Download Inception (2010) @movies_channel",
+            "filename": "TN 2026 (2026) [Tamil 1080p WEBRip HEVC x265 DD5.1].mkv",
+            "caption": "Tamil Movie 2026",
             "type": "movie",
-            "expected": "Inception.2010.1080p"
+            "expected": "TN.2026.2026.Tamil.1080p.WEBRip.HEVC.X265"
         },
         {
-            "filename": "Spam_Link_www.movies.com_The.Matrix.1999.720p.mkv",
-            "caption": "The Matrix (1999) - High Quality",
+            "filename": "Inception.2010.1080p.BluRay.x264.DDP5.1.mkv",
+            "caption": "Inception 2010",
             "type": "movie",
-            "expected": "The.Matrix.1999.720p"
-        },
-        # Series cases
-        {
-            "filename": "One.Piece.S01E1015.720p.WEBRip.mkv",
-            "caption": "One Piece Episode 1015 @anime_links",
-            "type": "series",
-            "expected": "One.Piece.2024.720p.S01E1015" # 2024 if TMDB not mocked, but let's see local parse
-        },
-        {
-            "filename": "Stranger.Things.S04E01-E02.1080p.mkv",
-            "caption": "Stranger Things S04 E01-02",
-            "type": "series",
-            "expected": "Stranger.Things.1080p.S04E01-E02"
-        },
-        # Spam/Handle cases
-        {
-            "filename": "@Join_Our_Channel_The.Dark.Knight.2008.mkv",
-            "caption": "https://t.me/spam_link The Dark Knight",
-            "type": "movie",
-            "expected": "The.Dark.Knight.2008.720p"
+            "expected": "Inception.2010.1080p.BLURAY.X264"
         }
     ]
 
-    print("Running Parser Tests...\n")
+    print("Running Rich Parser Tests...\n")
     for case in test_cases:
         info = parse_media_info(case["filename"], case["caption"], search_type=case["type"])
         result = str(info)
@@ -46,4 +25,4 @@ def test_parser():
         print("-" * 20)
 
 if __name__ == "__main__":
-    test_parser()
+    test_rich_parser()

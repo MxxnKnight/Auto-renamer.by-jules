@@ -5,7 +5,7 @@ from config import SPAM_KEYWORDS, CAPTION_TEMPLATE
 class MediaInfo:
     def __init__(self, title, year=None, resolution="720p", season=None, episode=None,
                  source=None, audio=None, codec=None, is_series=False):
-        self.title = title.strip().replace(" ", ".")
+        self.title = title.strip()
         self.year = year
         self.resolution = resolution or "720p"
         self.season = season
@@ -16,136 +16,132 @@ class MediaInfo:
         self.is_series = is_series
 
     def __str__(self):
-        title_dots = self.title.replace(" ", ".")
-        parts = [title_dots]
-        if self.year: parts.append(str(self.year))
+        # Format: Title (Year) [Audio Resolution Source Codec Subtitle]
+        # Or if series: Title Year Resolution S01E01
         
+        # 1. Base Title and Year
+        title_dots = self.title.replace(" ", ".")
+        main_part = f"{title_dots}"
+        if self.year:
+            main_part += f".{self.year}"
+        
+        # 2. Resolution
         res = self.resolution
         if res.isdigit(): res = f"{res}p"
-        parts.append(res)
         
+        # 3. Series Info
+        series_info = ""
         if self.is_series:
             if self.season is not None and self.episode is not None:
-                parts.append(f"S{int(self.season):02d}E{int(self.episode):02d}")
+                series_info = f"S{int(self.season):02d}E{int(self.episode):02d}"
             elif self.episode is not None:
-                parts.append(f"S01E{int(self.episode):02d}")
+                series_info = f"S01E{int(self.episode):02d}"
 
-        return ".".join(parts)
+        # 4. Tags (Audio, Source, Codec) - Using dots for consistency
+        tags = []
+        if self.audio: tags.append(self.audio.replace(" ", "."))
+        tags.append(res)
+        if self.source: tags.append(self.source.replace(" ", "."))
+        if self.codec: tags.append(self.codec.replace(" ", "."))
+        
+        tag_str = ".".join(tags)
+        
+        # Combine everything with dots
+        result = [main_part, tag_str]
+        if series_info: result.append(series_info)
+        
+        return ".".join(result)
 
 def clean_title(title):
-    # 1. Remove URLs (refined to avoid over-greediness in filenames)
+    # Aggressive URL/Handle removal
     title = re.sub(r'https?://\S+', '', title)
     title = re.sub(r'www\.[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,}', '', title)
     title = re.sub(r'\b\S+\.(com|org|net|in|co|me|info|io|biz|site|xyz|top|cloud|online)\b', '', title, flags=re.IGNORECASE)
-
-    # 2. Replace common filename separators with spaces EARLY
-    # This prevents handles like @Join_Our_Channel_Title from eating the title
     title = title.replace("_", " ").replace(".", " ")
-
-    # 3. Remove Telegram Handles and Links
     title = re.sub(r'@[a-zA-Z0-9_]+', '', title)
     title = re.sub(r't\.me/\S+', '', title)
-
-    # 4. Remove Hashtags
     title = re.sub(r'#\w+', '', title)
-
-    # 5. Remove content in brackets [] or ()
     title = re.sub(r'\[.*?\]', '', title)
     title = re.sub(r'\(.*?\)', '', title)
     
-    # 6. Handle "Prefix - Title"
     if ' - ' in title:
         segments = title.split(' - ')
         if len(segments[0]) < 15 or any(k.lower() in segments[0].lower() for k in ["Join", "Update", "Channel"]):
             title = segments[-1]
 
-    # 7. Replace non-alphanumeric (except space) with space
     title = re.sub(r'[^a-zA-Z0-9\s]', ' ', title)
-    
-    # 8. Remove Spam Keywords
     for keyword in sorted(SPAM_KEYWORDS, key=len, reverse=True):
         pattern = re.compile(r'\b' + re.escape(keyword) + r'\b', re.IGNORECASE)
         title = pattern.sub(' ', title)
 
-    # 9. Final Clean up
     title = re.sub(r'\s+', ' ', title).strip()
-    
-    # Remove trailing resolution-like things
-    title = re.sub(r'\b(480p|720p|1080p|2160p|4k|8k)\b', '', title, flags=re.IGNORECASE)
-    
-    return title.strip()
+    return title
 
 def extract_resolution(text):
     res_pattern = r'\b(\d{3,4}p|4k|8k)\b'
     match = re.search(res_pattern, text, re.IGNORECASE)
-    if match:
-        return match.group(1).lower()
+    if match: return match.group(1).lower()
     return None
 
-def extract_season_episode(text):
-    # Standard S01E01
-    match = re.search(r'S(\d{1,2})\s?E(\d{1,3})(?!\d|p)', text, re.IGNORECASE)
-    if match:
-        return int(match.group(1)), int(match.group(2))
-    
-    # 1x01
-    match = re.search(r'(\d{1,2})x(\d{1,3})(?!\d|p)', text, re.IGNORECASE)
-    if match:
-        return int(match.group(1)), int(match.group(2))
-    
-    # Ep 1 / Episode 1
-    match = re.search(r'(?:Episode|Ep)\s?\.?(\d{1,4})', text, re.IGNORECASE)
-    if match:
-        return None, int(match.group(1))
+def extract_source(text):
+    sources = [r'WEB[-_\s]?DL', r'WEB[-_\s]?Rip', r'BluRay', r'HDTV', r'DVD[-_\s]?Rip', r'BRRip', r'HDRip']
+    for p in sources:
+        m = re.search(p, text, re.IGNORECASE)
+        if m: return m.group(0).upper().replace(" ", "-")
+    return None
 
+def extract_codec(text):
+    codecs = [r'[hx]\.?26[45]', r'HEVC', r'10bit']
+    found = []
+    for p in codecs:
+        m = re.search(p, text, re.IGNORECASE)
+        if m: found.append(m.group(0).upper())
+    return " ".join(found) if found else None
+
+def extract_audio(text):
+    audios = [r'Hindi', r'English', r'Tamil', r'Telugu', r'Malayalam', r'Kannada', r'Dual[-_\s]?Audio', r'Multi[-_\s]?Audio', r'DDP\s?\d\.\d', r'AAC']
+    found = []
+    for p in audios:
+        m = re.search(p, text, re.IGNORECASE)
+        if m: found.append(m.group(0).title())
+    return " ".join(found) if found else None
+
+def extract_season_episode(text):
+    match = re.search(r'S(\d{1,2})\s?E(\d{1,3})(?!\d|p)', text, re.IGNORECASE)
+    if match: return int(match.group(1)), int(match.group(2))
+    match = re.search(r'(?:Episode|Ep)\s?\.?(\d{1,4})', text, re.IGNORECASE)
+    if match: return None, int(match.group(1))
     return None, None
 
-def find_metadata_split(text):
-    # Try to find where metadata starts (Year, S01, 720p)
-    year_match = re.search(r'(?<!\d)(19|20)\d{2}(?!\d)', text)
-    if year_match:
-        return year_match.start(), year_match.group(0)
-    
-    se_match = re.search(r'(S\d+|Ep\s?\d+|\d+x\d+)', text, re.IGNORECASE)
-    if se_match:
-        return se_match.start(), None
-        
-    res_match = re.search(r'(\d{3,4}p|4k|8k)', text, re.IGNORECASE)
-    if res_match:
-        return res_match.start(), None
-        
-    return -1, None
-
 def parse_media_info(filename, caption=None, search_type=None):
-    # Strip extension
-    base_name, ext = os.path.splitext(filename)
-    raw_text = base_name if ext.lower() in ['.mkv', '.mp4', '.avi', '.flv', '.mov', '.wmv', '.webm'] else filename
+    base_name, _ = os.path.splitext(filename)
+    raw_text = filename
+    combined_text = (caption or "") + " " + filename
     
-    # Priority: Caption often has cleaner metadata if it exists
-    combined_text = (caption or "") + " " + raw_text
+    # Extract Year
+    year = None
+    year_match = re.search(r'(?<!\d)(19|20)\d{2}(?!\d)', combined_text)
+    if year_match: year = int(year_match.group(0))
+
+    # Extract Resolution
+    resolution = extract_resolution(combined_text) or "720p"
     
-    split_idx, found_year_str = find_metadata_split(raw_text)
+    # Extract Title (everything before metadata)
+    title_part = base_name
+    meta_split = re.search(r'((19|20)\d{2}|S\d+E\d+|\d{3,4}p)', base_name, re.IGNORECASE)
+    if meta_split:
+        title_part = base_name[:meta_split.start()]
     
-    year = int(found_year_str) if found_year_str else None
-    title_part = raw_text
-    if split_idx != -1:
-        title_part = raw_text[:split_idx]
-    
-    # If title part is empty or too short, try to get title from first line of caption
     clean_t = clean_title(title_part)
     if len(clean_t) < 2 and caption:
-        first_line = caption.split('\n')[0]
-        clean_t = clean_title(first_line)
+        clean_t = clean_title(caption.split('\n')[0])
 
-    resolution = extract_resolution(combined_text) or "720p"
+    # Rich Extraction
+    source = extract_source(combined_text)
+    codec = extract_codec(combined_text)
+    audio = extract_audio(combined_text)
     season, episode = extract_season_episode(combined_text)
-    
-    # Secondary Year Search in combined text if not found in raw title
-    if not year:
-        year_match = re.search(r'(?<!\d)(19|20)\d{2}(?!\d)', combined_text)
-        if year_match:
-            year = int(year_match.group(0))
 
     is_series = (search_type == 'series')
     
-    return MediaInfo(clean_t, year, resolution, season, episode, is_series=is_series)
+    return MediaInfo(clean_t, year, resolution, season, episode, source, audio, codec, is_series)

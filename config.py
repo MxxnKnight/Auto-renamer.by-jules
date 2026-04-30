@@ -22,13 +22,26 @@ SOURCE_SERIES_CHANNEL = parse_channel(os.getenv("SOURCE_SERIES_CHANNEL"))
 TARGET_CHANNEL = parse_channel(os.getenv("TARGET_CHANNEL"))
 LOG_CHANNEL = parse_channel(os.getenv("LOG_CHANNEL")) # For error notifications
 
-# Optional: Custom removal list
+# Admin IDs (list of integers)
+ADMIN_IDS = [int(id.strip()) for id in os.getenv("ADMIN_IDS", "").split(",") if id.strip()]
+
+# Strict Formatting Template
+# Dot separated: Title.Year.Resolution.S01E01
+CAPTION_TEMPLATE = "{title}.{year}.{resolution}.{episode_info}"
+
+# Expanded Spam Keywords and Promotion Patterns
 SPAM_KEYWORDS = [
-    "MoviesFlix", "MoviesVerse", "YTS", "YIFY", 
-    "www.", ".com", ".org", ".in", ".net", ".co",
-    "TamilRockers", "Kuttymovies", "Hindi", "English",
-    "Dual Audio", "ESub", "Sub", "x264", "x265", "HEVC",
-    "WEBRip", "BluRay", "HDRip", "AAC", "10bit"
-    # Note: Some of these (like "English") might be part of the title in rare cases, 
-    # but usually are metadata. The parser will handle metadata separation intelligently.
+    # Websites & Handles
+    "MoviesFlix", "MoviesVerse", "YTS", "YIFY", "PSA", "GalaxyRG",
+    "www.", ".com", ".org", ".in", ".net", ".co", "t.me", "telegram.me",
+    "TamilRockers", "Kuttymovies", "Movierulz", "1337x", "PirateBay",
+    
+    # Common Promotion Text
+    "Join", "Our", "Sub", "Subscribe", "Follow", "Update", "Channel", "Group",
+    "Link", "Direct", "Download", "Watch", "Online", "Free",
+    
+    # Metadata that shouldn't be in TITLE (Parser will handle these separately)
+    "Hindi", "English", "Tamil", "Telugu", "Malayalam", "Kannada", "Dual Audio", "Multi Audio",
+    "x264", "x265", "HEVC", "10bit", "8bit", "AAC", "DDP5.1", "DDP2.0", "AC3",
+    "WEBRip", "BluRay", "HDRip", "WEB-DL", "DVDRip", "BRRip", "BDRip"
 ]

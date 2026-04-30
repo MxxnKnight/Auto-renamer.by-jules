@@ -146,7 +146,7 @@ async def handle_callbacks(client, query: CallbackQuery):
     elif data == "menu_template":
         await query.message.edit_text(f"⚙️ **Active Template**\n\n`{CAPTION_TEMPLATE}`", reply_markup=get_back_button())
 
-@app.on_message(filters.user(ADMIN_IDS) & filters.text & ~filters.command)
+@app.on_message(filters.user(ADMIN_IDS) & filters.text & ~filters.regex(r"^/"))
 async def handle_admin_inputs(client, message):
     user_id = message.from_user.id
     state = user_states.get(user_id)

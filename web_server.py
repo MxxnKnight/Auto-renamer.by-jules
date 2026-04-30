@@ -1,15 +1,30 @@
 import os
 import json
 import logging
+import time
 from aiohttp import web
 
 logger = logging.getLogger(__name__)
 
-# Temporary storage for file mappings
-file_map = {}
-
-# Egress tracking file
+# Persistent storage for file mappings
+LINKS_FILE = "links.json"
 EGRESS_FILE = "egress.json"
+
+def load_links():
+    if os.path.exists(LINKS_FILE):
+        try:
+            with open(LINKS_FILE, "r") as f:
+                data = json.load(f)
+                now = time.time()
+                return {k: v for k, v in data.items() if now - v.get("time", 0) < 86400}
+        except: return {}
+    return {}
+
+def save_links(file_map_data):
+    with open(LINKS_FILE, "w") as f:
+        json.dump(file_map_data, f)
+
+file_map = load_links()
 
 def get_egress():
     if os.path.exists(EGRESS_FILE):
@@ -54,9 +69,14 @@ async def handle_home(request):
 async def stream_player_handler(request):
     short_id = request.match_info.get('short_id')
     if short_id not in file_map:
-        return web.Response(text="File Not Found", status=404)
+        return web.Response(text="Link Expired or Invalid", status=404)
 
     data = file_map[short_id]
+    if time.time() - data.get("time", 0) > 86400:
+        file_map.pop(short_id, None)
+        save_links(file_map)
+        return web.Response(text="Link Expired (24h limit reached)", status=404)
+
     file_name = data["file_name"]
     stream_url = f"/dl/{short_id}"
     is_mkv = file_name.lower().endswith('.mkv')
@@ -74,41 +94,74 @@ async def stream_player_handler(request):
             .header {{ padding: 15px; background: #111; text-align: center; font-size: 14px; border-bottom: 1px solid #222; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }}
             .main-content {{ flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; }}
             .plyr-container {{ width: 100%; max-width: 1000px; padding: 10px; box-sizing: border-box; }}
-            .notice {{ margin-top: 15px; color: #ffa500; font-size: 13px; text-align: center; padding: 0 20px; }}
+            .notice {{ margin: 10px 0; color: #ffa500; font-size: 13px; text-align: center; }}
             .footer {{ padding: 20px; background: #000; text-align: center; }}
-            .btn {{ display: inline-block; padding: 12px 24px; background: #007bff; color: #fff; text-decoration: none; border-radius: 8px; font-weight: bold; transition: background 0.2s; }}
-            .btn:hover {{ background: #0056b3; }}
-            /* Fix Plyr scaling issues */
+            .btn {{ display: inline-block; padding: 10px 18px; color: #fff; text-decoration: none; border-radius: 8px; font-weight: 500; font-size: 14px; transition: opacity 0.2s; border: none; cursor: pointer; }}
+            .btn:hover {{ opacity: 0.8; }}
             .plyr {{ border-radius: 8px; overflow: hidden; }}
+            .tools {{ display: flex; gap: 10px; justify-content: center; margin-top: 10px; }}
         </style>
     </head>
     <body>
         <div class="header">🍿 {file_name}</div>
         <div class="main-content">
             <div class="plyr-container">
-                <video id="player" playsinline controls>
+                <video id="player" playsinline crossorigin="anonymous">
                     <source src="{stream_url}" type="video/mp4" />
                 </video>
+                <div class="tools">
+                    <button onclick="takeSnapshot()" class="btn" style="background: #e91e63;">📸 Take Frame</button>
+                    <button onclick="copyTimestamp()" class="btn" style="background: #9c27b0;">⏱️ Copy Time</button>
+                    <button onclick="copyLink('{request.url.scheme}://{request.host}{stream_url}')" class="btn" style="background: #4caf50;">📋 Copy Link</button>
+                </div>
             </div>
-            {"<div class='notice'>⚠️ <b>Note:</b> MKV files may not play in some browsers. If it's stuck, please use the button below to open in <b>VLC</b> or <b>MX Player</b>.</div>" if is_mkv else ""}
+            {"<div class='notice'>⚠️ <b>Note:</b> MKV format. If playback fails, use VLC/MX buttons below.</div>" if is_mkv else ""}
         </div>
         <div class="footer">
-            <div style="margin-bottom: 15px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+            <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
                 <a href="vlc://{request.url.scheme}://{request.host}{stream_url}" class="btn" style="background: #ff8800;">🧡 VLC</a>
                 <a href="intent://{request.host}{stream_url}#Intent;package=com.mxtech.videoplayer.ad;type=video/*;end" class="btn" style="background: #00aaff;">💙 MX Player</a>
-                <button onclick="copyLink('{request.url.scheme}://{request.host}{stream_url}')" class="btn" style="background: #28a745; border: none; cursor: pointer;">📋 Copy Link</button>
+                <a href="{stream_url}" class="btn" style="background: #6c757d;">📥 Download</a>
             </div>
-            <a href="{stream_url}" class="btn" style="background: #6c757d; width: 100%; max-width: 300px;">📥 Direct Download</a>
         </div>
+        <canvas id="snapshotCanvas" style="display:none;"></canvas>
         <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
         <script>
             const player = new Plyr('#player', {{
                 controls: ['play-large', 'play', 'progress', 'current-time', 'mute', 'volume', 'captions', 'settings', 'pip', 'airplay', 'fullscreen'],
                 ratio: '16:9'
             }});
+
+            function takeSnapshot() {{
+                const video = document.querySelector('video');
+                const canvas = document.getElementById('snapshotCanvas');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                const link = document.createElement('a');
+                link.download = 'snapshot_' + Math.floor(video.currentTime) + '.png';
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            }}
+
+            function copyTimestamp() {{
+                const video = document.querySelector('video');
+                const time = video.currentTime;
+                const hours = Math.floor(time / 3600);
+                const mins = Math.floor((time % 3600) / 60);
+                const secs = Math.floor(time % 60);
+                const formatted = [hours, mins, secs].map(v => v < 10 ? '0' + v : v).join(':');
+                
+                navigator.clipboard.writeText(formatted).then(() => {{
+                    alert('Timestamp ' + formatted + ' copied!');
+                }});
+            }}
+
             function copyLink(url) {{
                 navigator.clipboard.writeText(url).then(() => {{
-                    alert('Stream link copied to clipboard!');
+                    alert('Stream link copied!');
                 }});
             }}
         </script>
@@ -123,6 +176,11 @@ async def raw_stream_handler(request):
         return web.Response(text="Invalid Link", status=404)
 
     data = file_map[short_id]
+    if time.time() - data.get("time", 0) > 86400:
+        file_map.pop(short_id, None)
+        save_links(file_map)
+        return web.Response(text="Link Expired", status=404)
+
     file_id = data["file_id"]
     file_name = data["file_name"]
     file_size = data["file_size"]
@@ -147,6 +205,7 @@ async def raw_stream_handler(request):
         'Accept-Ranges': 'bytes',
         'Content-Length': str(content_length),
         'Content-Range': f'bytes {start}-{end}/{file_size}',
+        'Access-Control-Allow-Origin': '*' # Required for Snapshot feature
     }
 
     if not range_header:

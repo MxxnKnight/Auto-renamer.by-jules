@@ -199,13 +199,16 @@ async def admin_file_to_link(client, message):
     import uuid
     short_id = str(uuid.uuid4())[:8]
     
-    from web_server import file_map
+    import time
+    from web_server import file_map, save_links
     file_map[short_id] = {
         "file_id": file_id,
         "file_name": file_name or "file",
         "file_size": file_size,
-        "mime_type": mime_type or "application/octet-stream"
+        "mime_type": mime_type or "application/octet-stream",
+        "time": time.time()
     }
+    save_links(file_map)
     
     host_url = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("PING_URL")
     if not host_url:
@@ -217,6 +220,7 @@ async def admin_file_to_link(client, message):
     msg = (f"✅ **Links Generated Successfully!**\n\n"
            f"📁 **File Name:** `{file_name}`\n"
            f"📊 **File Size:** `{round(file_size / (1024*1024), 2)} MB`\n\n"
+           f"⚠️ **Note:** Links expire in **24 hours**.\n"
            f"📢 _Click the buttons below to download or stream._")
     
     markup = InlineKeyboardMarkup([

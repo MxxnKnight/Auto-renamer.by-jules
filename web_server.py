@@ -93,7 +93,12 @@ async def stream_player_handler(request):
             {"<div class='notice'>⚠️ <b>Note:</b> MKV files may not play in some browsers. If it's stuck, please use the button below to open in <b>VLC</b> or <b>MX Player</b>.</div>" if is_mkv else ""}
         </div>
         <div class="footer">
-            <a href="{stream_url}" class="btn">📥 Download / Stream in External Player</a>
+            <div style="margin-bottom: 15px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+                <a href="vlc://{request.url.scheme}://{request.host}{stream_url}" class="btn" style="background: #ff8800;">🧡 VLC</a>
+                <a href="intent://{request.host}{stream_url}#Intent;package=com.mxtech.videoplayer.ad;type=video/*;end" class="btn" style="background: #00aaff;">💙 MX Player</a>
+                <button onclick="copyLink('{request.url.scheme}://{request.host}{stream_url}')" class="btn" style="background: #28a745; border: none; cursor: pointer;">📋 Copy Link</button>
+            </div>
+            <a href="{stream_url}" class="btn" style="background: #6c757d; width: 100%; max-width: 300px;">📥 Direct Download</a>
         </div>
         <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
         <script>
@@ -101,6 +106,11 @@ async def stream_player_handler(request):
                 controls: ['play-large', 'play', 'progress', 'current-time', 'mute', 'volume', 'captions', 'settings', 'pip', 'airplay', 'fullscreen'],
                 ratio: '16:9'
             }});
+            function copyLink(url) {{
+                navigator.clipboard.writeText(url).then(() => {{
+                    alert('Stream link copied to clipboard!');
+                }});
+            }}
         </script>
     </body>
     </html>

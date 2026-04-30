@@ -1,13 +1,23 @@
-from aiohttp import web
-import logging
-import os
+import json
 
-logger = logging.getLogger(__name__)
+# Egress tracking file
+EGRESS_FILE = "egress.json"
 
-# Temporary storage for file mappings
-file_map = {}
+def get_egress():
+    if os.path.exists(EGRESS_FILE):
+        try:
+            with open(EGRESS_FILE, "r") as f:
+                return json.load(f).get("used", 0)
+        except: return 0
+    return 0
+
+def update_egress(bytes_sent):
+    current = get_egress()
+    with open(EGRESS_FILE, "w") as f:
+        json.dump({"used": current + bytes_sent}, f)
 
 async def handle_home(request):
+    # (Home content remains same)
     html_content = """
     <!DOCTYPE html>
     <html lang="en">
@@ -118,6 +128,7 @@ async def raw_stream_handler(request):
     try:
         async for chunk in app.stream_media(file_id, offset=start, limit=content_length):
             await response.write(chunk)
+            update_egress(len(chunk)) # TRACK BANDWIDTH
     except Exception as e:
         logger.error(f"Stream error: {e}")
     finally:

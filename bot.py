@@ -44,7 +44,8 @@ def get_main_menu():
         [InlineKeyboardButton("➕ Add Spam", callback_data="menu_add_spam"),
          InlineKeyboardButton("➖ Delete Spam", callback_data="menu_del_spam")],
         [InlineKeyboardButton("📋 Current Spams", callback_data="menu_all_spam")],
-        [InlineKeyboardButton("⚙️ Template", callback_data="menu_template")]
+        [InlineKeyboardButton("⚙️ Template", callback_data="menu_template"),
+         InlineKeyboardButton("📈 Bandwidth", callback_data="menu_bandwidth")]
     ])
 
 def get_back_button():
@@ -145,6 +146,19 @@ async def handle_callbacks(client, query: CallbackQuery):
     
     elif data == "menu_template":
         await query.message.edit_text(f"⚙️ **Active Template**\n\n`{CAPTION_TEMPLATE}`", reply_markup=get_back_button())
+
+    elif data == "menu_bandwidth":
+        from web_server import get_egress
+        used = get_egress()
+        used_gb = round(used / (1024**3), 2)
+        limit_gb = 100 # Render free tier limit
+        percent = min(100, round((used_gb / limit_gb) * 100, 1))
+        
+        msg = (f"📈 **Bandwidth Usage (Monthly)**\n\n"
+               f"• Used: `{used_gb} GB` / `{limit_gb} GB`\n"
+               f"• Progress: `{percent}%` used\n\n"
+               f"⚠️ _Note: Render Free Tier usually allows ~100GB/month before they might restrict speed._")
+        await query.message.edit_text(msg, reply_markup=get_back_button())
 
 @app.on_message(filters.user(ADMIN_IDS) & filters.text & ~filters.regex(r"^/"))
 async def handle_admin_inputs(client, message):

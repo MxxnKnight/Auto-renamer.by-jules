@@ -191,6 +191,16 @@ async def main():
     ping_url = os.getenv("PING_URL") or os.getenv("RENDER_EXTERNAL_URL")
     if ping_url: asyncio.create_task(ping_server(ping_url))
     await app.start()
+    
+    # Notify Admins & Log Channel on Startup
+    startup_msg = "🚀 **Auto-Renamer is now Live and Precision-Ready!**"
+    for admin_id in ADMIN_IDS:
+        try: await app.send_message(admin_id, startup_msg)
+        except: pass
+    if LOG_CHANNEL:
+        try: await app.send_message(LOG_CHANNEL, startup_msg)
+        except: pass
+
     asyncio.create_task(worker())
     logger.info("Bot started.")
     await idle()

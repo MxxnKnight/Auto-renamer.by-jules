@@ -16,34 +16,19 @@ class MediaInfo:
         self.is_series = is_series
 
     def __str__(self):
-        # Strictly format: Title.Year.Resolution.S00E00
-        # Replace spaces with dots in title
         title_dots = self.title.replace(" ", ".")
-        
         parts = [title_dots]
-        if self.year:
-            parts.append(str(self.year))
+        if self.year: parts.append(str(self.year))
         
-        # Ensure resolution has 'p' if numeric
         res = self.resolution
-        if res.isdigit():
-            res = f"{res}p"
+        if res.isdigit(): res = f"{res}p"
         parts.append(res)
         
         if self.is_series:
             if self.season is not None and self.episode is not None:
-                if isinstance(self.episode, list):
-                    # Handle multi-part
-                    ep_str = f"S{int(self.season):02d}E{int(self.episode[0]):02d}-E{int(self.episode[-1]):02d}"
-                else:
-                    ep_str = f"S{int(self.season):02d}E{int(self.episode):02d}"
-                parts.append(ep_str)
+                parts.append(f"S{int(self.season):02d}E{int(self.episode):02d}")
             elif self.episode is not None:
-                if isinstance(self.episode, list):
-                    ep_str = f"S01E{int(self.episode[0]):02d}-E{int(self.episode[-1]):02d}"
-                else:
-                    ep_str = f"S01E{int(self.episode):02d}"
-                parts.append(ep_str)
+                parts.append(f"S01E{int(self.episode):02d}")
 
         return ".".join(parts)
 
@@ -98,11 +83,6 @@ def extract_resolution(text):
     return None
 
 def extract_season_episode(text):
-    # Multi-part E01-02
-    match = re.search(r'S(\d+)\s?E(\d+)-E(\d+)', text, re.IGNORECASE)
-    if match:
-        return int(match.group(1)), [int(match.group(2)), int(match.group(3))]
-
     # Standard S01E01
     match = re.search(r'S(\d{1,2})\s?E(\d{1,3})(?!\d|p)', text, re.IGNORECASE)
     if match:

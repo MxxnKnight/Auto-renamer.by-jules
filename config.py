@@ -30,7 +30,7 @@ ADMIN_IDS = [int(id.strip()) for id in os.getenv("ADMIN_IDS", "").split(",") if 
 CAPTION_TEMPLATE = "{title}.{year}.{resolution}.{episode_info}"
 
 # Expanded Spam Keywords and Promotion Patterns
-SPAM_KEYWORDS = [
+DEFAULT_SPAM = [
     # Websites & Handles
     "MoviesFlix", "MoviesVerse", "YTS", "YIFY", "PSA", "GalaxyRG",
     "www.", ".com", ".org", ".in", ".net", ".co", "t.me", "telegram.me",
@@ -40,8 +40,36 @@ SPAM_KEYWORDS = [
     "Join", "Our", "Sub", "Subscribe", "Follow", "Update", "Channel", "Group",
     "Link", "Direct", "Download", "Watch", "Online", "Free",
     
-    # Metadata that shouldn't be in TITLE (Parser will handle these separately)
+    # Metadata
     "Hindi", "English", "Tamil", "Telugu", "Malayalam", "Kannada", "Dual Audio", "Multi Audio",
     "x264", "x265", "HEVC", "10bit", "8bit", "AAC", "DDP5.1", "DDP2.0", "AC3",
     "WEBRip", "BluRay", "HDRip", "WEB-DL", "DVDRip", "BRRip", "BDRip"
 ]
+
+CUSTOM_SPAM_FILE = "custom_spam.txt"
+
+def load_spam_keywords():
+    keywords = set(DEFAULT_SPAM)
+    if os.path.exists(CUSTOM_SPAM_FILE):
+        with open(CUSTOM_SPAM_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                word = line.strip()
+                if word: keywords.add(word)
+    return list(keywords)
+
+def save_spam_keyword(word, remove=False):
+    keywords = set()
+    if os.path.exists(CUSTOM_SPAM_FILE):
+        with open(CUSTOM_SPAM_FILE, "r", encoding="utf-8") as f:
+            keywords = {line.strip() for line in f if line.strip()}
+    
+    if remove:
+        keywords.discard(word)
+    else:
+        keywords.add(word)
+    
+    with open(CUSTOM_SPAM_FILE, "w", encoding="utf-8") as f:
+        for kw in sorted(list(keywords)):
+            f.write(f"{kw}\n")
+
+SPAM_KEYWORDS = load_spam_keywords()

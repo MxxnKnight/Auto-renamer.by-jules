@@ -48,18 +48,18 @@ async def handle_home(request):
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Bot Status</title>
         <style>
-            body { display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #121212; color: #ffffff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-            .container { text-align: center; padding: 2rem; background: #1e1e1e; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-            .status { font-size: 1.5rem; margin-bottom: 10px; display: flex; align-items: center; justify-content: center; }
-            .pulse { width: 12px; height: 12px; background-color: #4CAF50; border-radius: 50%; display: inline-block; animation: pulse-animation 2s infinite; margin-left: 10px; }
-            @keyframes pulse-animation { 0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7); } 70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(76, 175, 80, 0); } 100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); } }
-            .msg { color: #888; font-size: 0.9rem; }
+            body { display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #0f0f0f; color: #ffffff; font-family: 'Segoe UI', sans-serif; }
+            .container { text-align: center; padding: 2.5rem; background: #1a1a1a; border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.6); }
+            .status { font-size: 1.6rem; margin-bottom: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+            .pulse { width: 14px; height: 14px; background-color: #00ff88; border-radius: 50%; display: inline-block; animation: pulse-animation 2s infinite; margin-left: 12px; }
+            @keyframes pulse-animation { 0% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(0, 255, 136, 0.7); } 70% { transform: scale(1); box-shadow: 0 0 0 12px rgba(0, 255, 136, 0); } 100% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(0, 255, 136, 0); } }
+            .msg { color: #888; font-size: 0.95rem; letter-spacing: 0.5px; }
         </style>
     </head>
     <body>
         <div class="container">
-            <div class="status">Renamer Bot is Active <div class="pulse"></div></div>
-            <div class="msg">Precision processing enabled.</div>
+            <div class="status">System Online <div class="pulse"></div></div>
+            <div class="msg">Renamer Bot • High Precision Metadata</div>
         </div>
     </body>
     </html>
@@ -69,17 +69,21 @@ async def handle_home(request):
 async def stream_player_handler(request):
     short_id = request.match_info.get('short_id')
     if short_id not in file_map:
-        return web.Response(text="Link Expired or Invalid", status=404)
+        return web.Response(text="Link Expired", status=404)
 
     data = file_map[short_id]
     if time.time() - data.get("time", 0) > 86400:
         file_map.pop(short_id, None)
         save_links(file_map)
-        return web.Response(text="Link Expired (24h limit reached)", status=404)
+        return web.Response(text="Link Expired (24h)", status=404)
 
     file_name = data["file_name"]
     stream_url = f"/dl/{short_id}"
     is_mkv = file_name.lower().endswith('.mkv')
+    
+    # Compatibility links
+    vlc_link = f"vlc-http://{request.host}{stream_url}"
+    mx_link = f"intent://{request.host}{stream_url}#Intent;package=com.mxtech.videoplayer.ad;type=video/*;end"
 
     html_content = f"""
     <!DOCTYPE html>
@@ -87,82 +91,64 @@ async def stream_player_handler(request):
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Streaming: {file_name}</title>
+        <title>{file_name}</title>
         <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
         <style>
-            body {{ background: #000; margin: 0; padding: 0; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; flex-direction: column; height: 100vh; }}
-            .header {{ padding: 15px; background: #111; text-align: center; font-size: 14px; border-bottom: 1px solid #222; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }}
-            .main-content {{ flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; }}
-            .plyr-container {{ width: 100%; max-width: 1000px; padding: 10px; box-sizing: border-box; }}
-            .notice {{ margin: 10px 0; color: #ffa500; font-size: 13px; text-align: center; }}
-            .footer {{ padding: 20px; background: #000; text-align: center; }}
-            .btn {{ display: inline-block; padding: 10px 18px; color: #fff; text-decoration: none; border-radius: 8px; font-weight: 500; font-size: 14px; transition: opacity 0.2s; border: none; cursor: pointer; }}
-            .btn:hover {{ opacity: 0.8; }}
-            .plyr {{ border-radius: 8px; overflow: hidden; }}
-            .tools {{ display: flex; gap: 10px; justify-content: center; margin-top: 10px; }}
+            body {{ background: #000; margin: 0; padding: 0; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; }}
+            .header {{ padding: 12px; background: #111; text-align: center; font-size: 13px; color: #aaa; border-bottom: 1px solid #222; }}
+            .main-content {{ flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }}
+            .plyr-container {{ width: 100%; max-width: 900px; padding: 10px; }}
+            .notice {{ margin: 10px; padding: 10px; background: rgba(255,165,0,0.1); border: 1px solid rgba(255,165,0,0.3); border-radius: 8px; font-size: 12px; color: #ffa500; max-width: 800px; text-align: center; }}
+            .footer {{ padding: 25px; background: #050505; text-align: center; }}
+            .btn {{ display: inline-block; padding: 10px 20px; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 13px; cursor: pointer; border: none; }}
+            .tools {{ margin-top: 15px; display: flex; gap: 8px; justify-content: center; }}
+            .plyr {{ border-radius: 10px; }}
         </style>
     </head>
     <body>
-        <div class="header">🍿 {file_name}</div>
+        <div class="header">Streaming: {file_name}</div>
         <div class="main-content">
             <div class="plyr-container">
                 <video id="player" playsinline crossorigin="anonymous">
                     <source src="{stream_url}" type="video/mp4" />
                 </video>
                 <div class="tools">
-                    <button onclick="takeSnapshot()" class="btn" style="background: #e91e63;">📸 Take Frame</button>
-                    <button onclick="copyTimestamp()" class="btn" style="background: #9c27b0;">⏱️ Copy Time</button>
-                    <button onclick="copyLink('{request.url.scheme}://{request.host}{stream_url}')" class="btn" style="background: #4caf50;">📋 Copy Link</button>
+                    <button onclick="takeSnapshot()" class="btn" style="background: #ff2e63;">📸 Frame</button>
+                    <button onclick="copyTimestamp()" class="btn" style="background: #08d9d6;">⏱️ Time</button>
+                    <button onclick="copyLink('{request.url.scheme}://{request.host}{stream_url}')" class="btn" style="background: #252a34;">📋 Raw Link</button>
                 </div>
             </div>
-            {"<div class='notice'>⚠️ <b>Note:</b> MKV format. If playback fails, use VLC/MX buttons below.</div>" if is_mkv else ""}
+            {"<div class='notice'>🎥 <b>Codec Warning:</b> This MKV uses HEVC/x265. If you see a black screen or it won't load, use the <b>VLC</b> button below.</div>" if is_mkv else ""}
         </div>
         <div class="footer">
-            <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-                <a href="vlc://{request.url.scheme}://{request.host}{stream_url}" class="btn" style="background: #ff8800;">🧡 VLC</a>
-                <a href="intent://{request.host}{stream_url}#Intent;package=com.mxtech.videoplayer.ad;type=video/*;end" class="btn" style="background: #00aaff;">💙 MX Player</a>
-                <a href="{stream_url}" class="btn" style="background: #6c757d;">📥 Download</a>
+            <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-bottom: 15px;">
+                <a href="{vlc_link}" class="btn" style="background: #ff8800; border: 1px solid #ff8800;">🧡 Watch in VLC</a>
+                <a href="{mx_link}" class="btn" style="background: #00aaff; border: 1px solid #00aaff;">💙 MX Player</a>
             </div>
+            <a href="{stream_url}" class="btn" style="background: transparent; border: 1px solid #333; color: #888;">📥 Download File</a>
         </div>
         <canvas id="snapshotCanvas" style="display:none;"></canvas>
         <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
         <script>
             const player = new Plyr('#player', {{
-                controls: ['play-large', 'play', 'progress', 'current-time', 'mute', 'volume', 'captions', 'settings', 'pip', 'airplay', 'fullscreen'],
+                controls: ['play-large', 'play', 'progress', 'current-time', 'mute', 'volume', 'settings', 'pip', 'fullscreen'],
                 ratio: '16:9'
             }});
-
             function takeSnapshot() {{
-                const video = document.querySelector('video');
-                const canvas = document.getElementById('snapshotCanvas');
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                
-                const link = document.createElement('a');
-                link.download = 'snapshot_' + Math.floor(video.currentTime) + '.png';
-                link.href = canvas.toDataURL('image/png');
-                link.click();
+                const v = document.querySelector('video');
+                const c = document.getElementById('snapshotCanvas');
+                c.width = v.videoWidth; c.height = v.videoHeight;
+                c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+                const l = document.createElement('a');
+                l.download = 'frame.png'; l.href = c.toDataURL('image/png'); l.click();
             }}
-
             function copyTimestamp() {{
-                const video = document.querySelector('video');
-                const time = video.currentTime;
-                const hours = Math.floor(time / 3600);
-                const mins = Math.floor((time % 3600) / 60);
-                const secs = Math.floor(time % 60);
-                const formatted = [hours, mins, secs].map(v => v < 10 ? '0' + v : v).join(':');
-                
-                navigator.clipboard.writeText(formatted).then(() => {{
-                    alert('Timestamp ' + formatted + ' copied!');
-                }});
+                const t = document.querySelector('video').currentTime;
+                const fmt = new Date(t * 1000).toISOString().substr(11, 8);
+                navigator.clipboard.writeText(fmt).then(() => alert('Time copied: ' + fmt));
             }}
-
             function copyLink(url) {{
-                navigator.clipboard.writeText(url).then(() => {{
-                    alert('Stream link copied!');
-                }});
+                navigator.clipboard.writeText(url).then(() => alert('Link copied!'));
             }}
         </script>
     </body>
@@ -205,7 +191,8 @@ async def raw_stream_handler(request):
         'Accept-Ranges': 'bytes',
         'Content-Length': str(content_length),
         'Content-Range': f'bytes {start}-{end}/{file_size}',
-        'Access-Control-Allow-Origin': '*' # Required for Snapshot feature
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'no-cache' # Prevent browser from getting "stale" chunks
     }
 
     if not range_header:
@@ -215,11 +202,12 @@ async def raw_stream_handler(request):
     await response.prepare(request)
 
     try:
+        # Optimized chunk size for Render/Telegram stability (2MB)
         async for chunk in app.stream_media(file_id, offset=start, limit=content_length):
             await response.write(chunk)
             update_egress(len(chunk))
     except Exception as e:
-        logger.error(f"Stream error: {e}")
+        logger.error(f"Stream interrupted: {e}")
     finally:
         await response.write_eof()
     

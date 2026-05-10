@@ -95,7 +95,7 @@ async def stream_player_handler(request):
     is_mkv = file_name.lower().endswith('.mkv')
     
     # Compatibility links
-    vlc_link = f"vlc-http://{request.host}{stream_url}"
+    vlc_link = f"/m3u/{short_id}"
     mx_link = f"intent://{request.host}{stream_url}#Intent;package=com.mxtech.videoplayer.ad;type=video/*;end"
 
     html_content = f"""
@@ -272,8 +272,24 @@ async def raw_stream_handler(request):
     await response.prepare(request)
 
     try:
-        # Optimized chunk size for Render/Telegram stability (2MB)
-        async for chunk in app.stream_media(file_id, offset=start, limit=content_length):
+        # Telegram API requires offset to be a multiple of 1MB (1048576 bytes)
+        chunk_size = 1048576
+        aligned_offset = start - (start % chunk_size)
+        skip_bytes = start - aligned_offset
+        limit = content_length + skip_bytes
+
+        async for chunk in app.stream_media(file_id, offset=aligned_offset, limit=limit):
+            if skip_bytes > 0:
+                if len(chunk) <= skip_bytes:
+                    skip_bytes -= len(chunk)
+                    continue
+                else:
+                    chunk = chunk[skip_bytes:]
+                    skip_bytes = 0
+            
+            if not chunk:
+                continue
+                
             await response.write(chunk)
             update_egress(len(chunk))
     except Exception as e:
@@ -283,6 +299,19 @@ async def raw_stream_handler(request):
     
     return response
 
+async def m3u_handler(request):
+    short_id = request.match_info.get('short_id')
+    if short_id not in file_map:
+        return web.Response(text="Invalid Link", status=404)
+        
+    data = file_map[short_id]
+    file_name = data["file_name"]
+    stream_url = f"{request.url.scheme}://{request.host}/dl/{short_id}"
+    
+    m3u_content = f"#EXTM3U\n#EXTINF:-1,{file_name}\n{stream_url}"
+    headers = {'Content-Disposition': f'attachment; filename="stream.m3u"'}
+    return web.Response(text=m3u_content, headers=headers, content_type='audio/x-mpegurl')
+
 async def start_web_server(client):
     asyncio.create_task(save_egress_task())
     web_app = web.Application()
@@ -290,4 +319,5 @@ async def start_web_server(client):
     web_app.router.add_get('/', handle_home)
     web_app.router.add_get('/view/{short_id}', stream_player_handler)
     web_app.router.add_get('/dl/{short_id}', raw_stream_handler)
+    web_app.router.add_get('/m3u/{short_id}', m3u_handler)
     return web_app

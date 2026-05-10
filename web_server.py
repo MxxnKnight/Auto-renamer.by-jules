@@ -272,26 +272,29 @@ async def raw_stream_handler(request):
     await response.prepare(request)
 
     try:
-        # Telegram API requires offset to be a multiple of 1MB (1048576 bytes)
+        # Pyrogram's stream_media offset is in chunks of 1MB, not bytes!
         chunk_size = 1048576
-        aligned_offset = start - (start % chunk_size)
-        skip_bytes = start - aligned_offset
-        limit = content_length + skip_bytes
+        chunk_offset = start // chunk_size
+        skip_bytes = start % chunk_size
+        bytes_to_send = content_length
 
-        async for chunk in app.stream_media(file_id, offset=aligned_offset, limit=limit):
+        async for chunk in app.stream_media(file_id, offset=chunk_offset):
             if skip_bytes > 0:
-                if len(chunk) <= skip_bytes:
-                    skip_bytes -= len(chunk)
-                    continue
-                else:
-                    chunk = chunk[skip_bytes:]
-                    skip_bytes = 0
+                chunk = chunk[skip_bytes:]
+                skip_bytes = 0
             
             if not chunk:
                 continue
                 
+            if len(chunk) > bytes_to_send:
+                chunk = chunk[:bytes_to_send]
+                
             await response.write(chunk)
             update_egress(len(chunk))
+            bytes_to_send -= len(chunk)
+            
+            if bytes_to_send <= 0:
+                break
     except Exception as e:
         logger.error(f"Stream interrupted: {e}")
     finally:

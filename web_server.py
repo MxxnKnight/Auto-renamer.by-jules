@@ -269,7 +269,6 @@ async def raw_stream_handler(request):
         headers['Content-Disposition'] = f'attachment; filename="{file_name}"'
 
     response = web.StreamResponse(status=206 if range_header else 200, headers=headers)
-    response.enable_chunked_encoding() # Ensures aiohttp doesn't complain about content length when chunks arrive
     await response.prepare(request)
 
     try:
